@@ -125,12 +125,13 @@ export function useApproveJoinRequest() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (requestId: string) =>
+    mutationFn: ({ requestId, role }: { requestId: string; role: FamilyMemberRole }) =>
       apiFetch<void>(`/api/family/join-requests/${requestId}/approve`, {
         method: 'POST',
+        body: { role },
       }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.family })
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.family, refetchType: 'all' })
     },
   })
 }
@@ -143,8 +144,22 @@ export function useRejectJoinRequest() {
       apiFetch<void>(`/api/family/join-requests/${requestId}/reject`, {
         method: 'POST',
       }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.family })
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.family, refetchType: 'all' })
+    },
+  })
+}
+
+export function useRegenerateInviteCode() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (contextId: string) =>
+      apiFetch<{ inviteCode: string }>(`/api/contexts/${contextId}/invite/regenerate`, {
+        method: 'POST',
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.family, refetchType: 'all' })
     },
   })
 }

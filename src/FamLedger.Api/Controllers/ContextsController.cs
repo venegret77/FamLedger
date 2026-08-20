@@ -69,10 +69,12 @@ public class ContextsController(IContextService contextService, IUserService use
         return Ok(requests.Select(r => new { r.Id, r.UserId, Name = r.User.DisplayName ?? r.User.FirstName, r.CreatedAt }));
     }
 
+    public record ApproveJoinBody(FamilyMemberRole? Role);
+
     [HttpPost("join-requests/{requestId:guid}/approve")]
-    public async Task<IActionResult> Approve(Guid requestId, CancellationToken ct)
+    public async Task<IActionResult> Approve(Guid requestId, [FromBody] ApproveJoinBody? body, CancellationToken ct)
     {
-        await contextService.ApproveJoinAsync(requestId, User.GetUserId(), ct);
+        await contextService.ApproveJoinAsync(requestId, User.GetUserId(), body?.Role ?? FamilyMemberRole.Member, ct);
         return Ok();
     }
 

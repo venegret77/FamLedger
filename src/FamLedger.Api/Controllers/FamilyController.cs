@@ -1,5 +1,6 @@
 using FamLedger.Api.Extensions;
 using FamLedger.Common;
+using FamLedger.Domain.Enums;
 using FamLedger.Interfaces.Services;
 using FamLedger.Repository;
 using Microsoft.AspNetCore.Authorization;
@@ -92,11 +93,21 @@ public class FamilyController(
         });
     }
 
+    public record ApproveJoinRequest(FamilyMemberRole? Role);
+
     [HttpPost("join-requests/{requestId:guid}/approve")]
-    public async Task<IActionResult> Approve(Guid requestId, CancellationToken ct)
+    public async Task<IActionResult> Approve(Guid requestId, [FromBody] ApproveJoinRequest? request, CancellationToken ct)
     {
-        await contextService.ApproveJoinAsync(requestId, User.GetUserId(), ct);
-        return Ok();
+        var role = request?.Role ?? FamilyMemberRole.Member;
+        try
+        {
+            await contextService.ApproveJoinAsync(requestId, User.GetUserId(), role, ct);
+            return Ok();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
     }
 
     [HttpPost("join-requests/{requestId:guid}/reject")]

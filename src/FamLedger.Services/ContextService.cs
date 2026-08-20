@@ -64,7 +64,7 @@ public class ContextService(AppDbContext db) : IContextService
         return request;
     }
 
-    public async Task ApproveJoinAsync(Guid requestId, Guid approverUserId, CancellationToken ct = default)
+    public async Task ApproveJoinAsync(Guid requestId, Guid approverUserId, FamilyMemberRole role = FamilyMemberRole.Member, CancellationToken ct = default)
     {
         var request = await db.JoinRequests.Include(r => r.Context).FirstOrDefaultAsync(r => r.Id == requestId, ct)
             ?? throw new InvalidOperationException("Request not found");
@@ -73,6 +73,12 @@ public class ContextService(AppDbContext db) : IContextService
         if (approver is null || !RolePermissions.CanApproveJoinRequests(approver.Role))
             throw new UnauthorizedAccessException();
 
+        if (role == FamilyMemberRole.Head && approver.Role != FamilyMemberRole.Head)
+            throw new UnauthorizedAccessException();
+
+        if (role is not (FamilyMemberRole.Member or FamilyMemberRole.Assistant or FamilyMemberRole.Head))
+            role = FamilyMemberRole.Member;
+
         request.Status = JoinRequestStatus.Approved;
         request.ResolvedAt = DateTime.UtcNow;
         request.ResolvedByUserId = approverUserId;
@@ -80,7 +86,7 @@ public class ContextService(AppDbContext db) : IContextService
         {
             ContextId = request.ContextId,
             UserId = request.UserId,
-            Role = FamilyMemberRole.Member
+            Role = role
         });
         await db.SaveChangesAsync(ct);
     }

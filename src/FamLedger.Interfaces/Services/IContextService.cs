@@ -10,7 +10,7 @@ public interface IContextService
     Task<BudgetContext?> GetByIdAsync(Guid id, CancellationToken ct = default);
     Task<ContextMember?> GetMembershipAsync(Guid contextId, Guid userId, CancellationToken ct = default);
     Task<JoinRequest> RequestJoinAsync(Guid userId, string inviteCode, CancellationToken ct = default);
-    Task ApproveJoinAsync(Guid requestId, Guid approverUserId, CancellationToken ct = default);
+    Task ApproveJoinAsync(Guid requestId, Guid approverUserId, FamilyMemberRole role = FamilyMemberRole.Member, CancellationToken ct = default);
     Task RejectJoinAsync(Guid requestId, Guid approverUserId, CancellationToken ct = default);
     Task<IReadOnlyList<JoinRequest>> GetPendingRequestsAsync(Guid contextId, CancellationToken ct = default);
     Task<IReadOnlyList<ContextMember>> GetMembersAsync(Guid contextId, CancellationToken ct = default);
