@@ -11,6 +11,8 @@ import type {
   Income,
   OneOffExpense,
   RecurringExpense,
+  Reminder,
+  ReminderAudience,
   SavingsResponse,
   Transaction,
   UserProfile,
@@ -29,6 +31,7 @@ export const queryKeys = {
   settings: ['settings'] as const,
   categories: ['categories'] as const,
   contexts: ['contexts'] as const,
+  reminders: ['reminders'] as const,
 }
 
 export function useMe() {
@@ -705,4 +708,67 @@ export function usePermissions() {
     canManageFamilySettings: settings?.canManageFamilySettings ?? true,
     myRole: settings?.myRole ?? 'Head',
   }
+}
+
+export function useReminders() {
+  return useQuery({
+    queryKey: queryKeys.reminders,
+    queryFn: () => apiFetch<Reminder[]>('/api/reminders'),
+  })
+}
+
+export function useCreateReminder() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (payload: {
+      message: string
+      timeUtc: string
+      audience: ReminderAudience
+    }) =>
+      apiFetch<Reminder>('/api/reminders', {
+        method: 'POST',
+        body: {
+          message: payload.message,
+          timeUtc: payload.timeUtc,
+          audience: payload.audience,
+        },
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.reminders })
+    },
+  })
+}
+
+export function useUpdateReminder() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      id,
+      ...payload
+    }: {
+      id: string
+      message: string
+      timeUtc: string
+      audience: ReminderAudience
+      isEnabled: boolean
+    }) =>
+      apiFetch<Reminder>(`/api/reminders/${id}`, {
+        method: 'PUT',
+        body: payload,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.reminders })
+    },
+  })
+}
+
+export function useDeleteReminder() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<void>(`/api/reminders/${id}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.reminders })
+    },
+  })
 }

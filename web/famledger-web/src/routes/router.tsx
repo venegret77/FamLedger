@@ -6,6 +6,7 @@ import { DebtsPage } from '../pages/DebtsPage'
 import { FamilyPage } from '../pages/FamilyPage'
 import { LoginPage } from '../pages/LoginPage'
 import { PlanPage } from '../pages/PlanPage'
+import { RemindersPage } from '../pages/RemindersPage'
 import { SavingsPage } from '../pages/SavingsPage'
 import { SettingsPage } from '../pages/SettingsPage'
 import { TransactionsPage } from '../pages/TransactionsPage'
@@ -27,6 +28,7 @@ export const router = createBrowserRouter([
           { path: 'savings', element: <SavingsPage /> },
           { path: 'debts', element: <DebtsPage /> },
           { path: 'transactions', element: <TransactionsPage /> },
+          { path: 'reminders', element: <RemindersPage /> },
           { path: 'family', element: <FamilyPage /> },
           { path: 'settings', element: <SettingsPage /> },
         ],

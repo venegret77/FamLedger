@@ -200,3 +200,18 @@ export interface AppSettings {
   canManageFamilySettings?: boolean
   categories?: { id: string; name: string; kind?: string }[]
 }
+
+export type ReminderAudience = 'Self' | 'Family'
+
+export interface Reminder {
+  id: string
+  message: string
+  timeUtc: string
+  audience: ReminderAudience
+  isEnabled: boolean
+  createdByUserId: string
+  createdByName?: string
+  canEdit: boolean
+  createdAtUtc: string
+  updatedAtUtc: string
+}

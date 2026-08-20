@@ -147,3 +147,28 @@ public interface IDialogStateService
     Task SetAsync(long chatId, FamLedger.Domain.Models.DialogState state, TimeSpan? expiry, CancellationToken ct = default);
     Task ClearAsync(long chatId, CancellationToken ct = default);
 }
+
+public interface IReminderService
+{
+    Task<IReadOnlyList<Reminder>> ListVisibleAsync(Guid contextId, Guid userId, CancellationToken ct = default);
+    Task<Reminder> CreateAsync(
+        Guid contextId,
+        Guid userId,
+        string message,
+        TimeOnly timeUtc,
+        Domain.Enums.ReminderAudience audience,
+        bool isPersonalContext,
+        CancellationToken ct = default);
+    Task<Reminder> UpdateAsync(
+        Guid id,
+        Guid userId,
+        string message,
+        TimeOnly timeUtc,
+        Domain.Enums.ReminderAudience audience,
+        bool isEnabled,
+        bool isPersonalContext,
+        CancellationToken ct = default);
+    Task DeleteAsync(Guid id, Guid userId, CancellationToken ct = default);
+    Task<IReadOnlyList<Reminder>> GetDueAsync(TimeOnly timeUtc, DateOnly todayUtc, CancellationToken ct = default);
+    Task MarkFiredAsync(Guid id, DateOnly todayUtc, CancellationToken ct = default);
+}

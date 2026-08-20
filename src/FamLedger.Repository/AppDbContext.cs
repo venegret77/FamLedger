@@ -26,6 +26,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<RateOverride> RateOverrides => Set<RateOverride>();
     public DbSet<NotificationSubscription> NotificationSubscriptions => Set<NotificationSubscription>();
     public DbSet<WebhookEndpoint> WebhookEndpoints => Set<WebhookEndpoint>();
+    public DbSet<Reminder> Reminders => Set<Reminder>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -212,6 +213,16 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.ToTable("webhook_endpoints");
             e.HasKey(x => x.Id);
             e.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId);
+        });
+
+        modelBuilder.Entity<Reminder>(e =>
+        {
+            e.ToTable("reminders");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.IsEnabled, x.TimeUtc });
+            e.Property(x => x.Message).HasMaxLength(1000);
+            e.HasOne(x => x.Context).WithMany(x => x.Reminders).HasForeignKey(x => x.ContextId);
+            e.HasOne(x => x.CreatedByUser).WithMany().HasForeignKey(x => x.CreatedByUserId);
         });
     }
 }

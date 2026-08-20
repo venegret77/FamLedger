@@ -72,6 +72,7 @@ public static class ServiceCollectionExtensions
             .AddScoped<IDebtService, DebtService>()
             .AddScoped<ISavingsService, SavingsService>()
             .AddScoped<IGoalService, GoalService>()
+            .AddScoped<IReminderService, ReminderService>()
             .AddScoped<IAuthService, AuthService>()
             .AddScoped<ILoginTokenService, LoginTokenService>()
             .AddScoped<IFileStorageService, FileStorageService>()
