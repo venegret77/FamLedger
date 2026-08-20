@@ -39,6 +39,20 @@ const navItems: NavItem[] = [
     ),
   },
   {
+    to: '/savings',
+    label: 'Копилка',
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="size-5">
+        <path
+          d="M19 11a7 7 0 1 1-12.8-3.9L5 5h3l1.2 1.5A7 7 0 0 1 19 11Z"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path d="M16 11h.01M3 14h2M20.5 15.5 22 17" strokeLinecap="round" />
+      </svg>
+    ),
+  },
+  {
     to: '/debts',
     label: 'Долги',
     icon: (
