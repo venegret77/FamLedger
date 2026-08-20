@@ -58,8 +58,11 @@ public class TelegramBot(
                 if (payload.StartsWith("login", StringComparison.OrdinalIgnoreCase))
                 {
                     var token = await loginTokenService.CreateAsync(telegramUserId, ct);
+                    var keyboard = new InlineKeyboardMarkup(
+                        InlineKeyboardButton.WithCopyText("Скопировать код", token));
                     await client.SendMessage(chatId,
                         $"Код для входа (10 мин):\n{token}",
+                        replyMarkup: keyboard,
                         cancellationToken: ct);
                     return;
                 }
