@@ -583,6 +583,10 @@ export function useUploadAvatar() {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.me, refetchType: 'all' })
     },
+  })
+}
+
+export function useDeleteTransaction() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (id: string) =>
