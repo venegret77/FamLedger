@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+bin/
+obj/
+*.user
+.idea/
+.vs/
+test-cookies.txt
+test-body.json

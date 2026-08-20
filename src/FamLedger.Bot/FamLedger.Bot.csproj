@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>dotnet-FamLedger.Bot-9113a663-78b7-447f-8d71-7efbdbc8052b</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="AspNetCore.HealthChecks.NpgSql" Version="9.0.0" />
+    <PackageReference Include="AspNetCore.HealthChecks.Redis" Version="9.0.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.8">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\FamLedger.Services\FamLedger.Services.csproj" />
+    <ProjectReference Include="..\FamLedger.Repository\FamLedger.Repository.csproj" />
+    <ProjectReference Include="..\FamLedger.Telegram\FamLedger.Telegram.csproj" />
+    <ProjectReference Include="..\FamLedger.Interfaces\FamLedger.Interfaces.csproj" />
+    <ProjectReference Include="..\FamLedger.Common\FamLedger.Common.csproj" />
+    <ProjectReference Include="..\FamLedger.Domain\FamLedger.Domain.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/FamLedger.Api/FamLedger.Api.csproj" />
+    <Project Path="src/FamLedger.Bot/FamLedger.Bot.csproj" />
+    <Project Path="src/FamLedger.Common/FamLedger.Common.csproj" />
+    <Project Path="src/FamLedger.Domain/FamLedger.Domain.csproj" />
+    <Project Path="src/FamLedger.Interfaces/FamLedger.Interfaces.csproj" />
+    <Project Path="src/FamLedger.Repository/FamLedger.Repository.csproj" />
+    <Project Path="src/FamLedger.Services/FamLedger.Services.csproj" />
+    <Project Path="src/FamLedger.Telegram/FamLedger.Telegram.csproj" />
+  </Folder>
+</Solution>
