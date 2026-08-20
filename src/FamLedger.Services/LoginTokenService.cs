@@ -4,13 +4,23 @@ namespace FamLedger.Services;
 
 public class LoginTokenService(IRedisService redis) : ILoginTokenService
 {
+    private const int CodeLength = 6;
     private static string Key(string token) => $"login:bot:{token}";
 
     public async Task<string> CreateAsync(long telegramUserId, CancellationToken ct = default)
     {
-        var token = Guid.NewGuid().ToString("N");
-        await redis.SetAsync(Key(token), telegramUserId.ToString(), TimeSpan.FromMinutes(10));
-        return token;
+        for (var attempt = 0; attempt < 20; attempt++)
+        {
+            var token = Random.Shared.Next(0, 1_000_000).ToString($"D{CodeLength}");
+            var key = Key(token);
+            if (await redis.ExistsAsync(key))
+                continue;
+
+            await redis.SetAsync(key, telegramUserId.ToString(), TimeSpan.FromMinutes(10));
+            return token;
+        }
+
+        throw new InvalidOperationException("Could not allocate a unique login code");
     }
 
     public async Task<long?> ConsumeAsync(string token, CancellationToken ct = default)
@@ -29,8 +39,7 @@ public class LoginTokenService(IRedisService redis) : ILoginTokenService
     {
         if (string.IsNullOrWhiteSpace(token)) return null;
         var cleaned = token.Trim().Trim('`', '"', '\'');
-        // Keep hex only — strips zero-width / markdown leftovers from Telegram copy.
-        cleaned = new string(cleaned.Where(char.IsAsciiHexDigit).ToArray());
-        return cleaned.Length == 32 ? cleaned.ToLowerInvariant() : null;
+        cleaned = new string(cleaned.Where(char.IsAsciiDigit).ToArray());
+        return cleaned.Length == CodeLength ? cleaned : null;
     }
 }
