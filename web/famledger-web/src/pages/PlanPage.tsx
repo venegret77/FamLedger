@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type ReactNode } from 'react'
+import { useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import {
   useCreateIncome,
   useCreateOneOff,
@@ -25,6 +25,7 @@ import { Badge } from '../components/ui/Tabs'
 import { Button } from '../components/ui/Button'
 import { useConfirmDialog } from '../components/ui/ConfirmDialog'
 import { Input, Select } from '../components/ui/Input'
+import { formatMoney } from '../lib/format'
 
 const planTabs = [
   { id: 'recurring', label: 'Постоянные' },
@@ -63,6 +64,22 @@ export function PlanPage() {
     (activeTab === 'monthly' && oneOff.isLoading) ||
     (activeTab === 'incomes' && incomes.isLoading)
 
+  const recurringTotalRsd = useMemo(
+    () =>
+      (recurring.data ?? [])
+        .filter((i) => !i.isSkipped)
+        .reduce((sum, i) => sum + (i.plannedBaseAmount ?? i.periodAmount ?? 0), 0),
+    [recurring.data],
+  )
+  const oneOffTotalRsd = useMemo(
+    () => (oneOff.data ?? []).reduce((sum, i) => sum + (i.baseAmount ?? 0), 0),
+    [oneOff.data],
+  )
+  const incomesTotalRsd = useMemo(
+    () => (incomes.data ?? []).reduce((sum, i) => sum + (i.baseAmount ?? 0), 0),
+    [incomes.data],
+  )
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -84,6 +101,7 @@ export function PlanPage() {
         <>
           {activeTab === 'recurring' && (
             <>
+              <PlanTotal label="Итого постоянные" amount={recurringTotalRsd} currency={defaultCurrency} />
               {canManagePlan && (
                 <AddRecurringForm
                   defaultCurrency={defaultCurrency}
@@ -191,6 +209,7 @@ export function PlanPage() {
 
           {activeTab === 'monthly' && (
             <>
+              <PlanTotal label="Итого разовые" amount={oneOffTotalRsd} currency={defaultCurrency} />
               {canManagePlan && (
                 <AddOneOffForm
                   defaultCurrency={defaultCurrency}
@@ -248,6 +267,7 @@ export function PlanPage() {
 
           {activeTab === 'incomes' && (
             <>
+              <PlanTotal label="Итого доходы" amount={incomesTotalRsd} currency={defaultCurrency} />
               {canManagePlan && (
                 <AddIncomeForm
                   defaultCurrency={defaultCurrency}
@@ -314,6 +334,25 @@ export function PlanPage() {
           )}
         </>
       )}
+    </div>
+  )
+}
+
+function PlanTotal({
+  label,
+  amount,
+  currency,
+}: {
+  label: string
+  amount: number
+  currency: string
+}) {
+  return (
+    <div className="flex items-center justify-between rounded-2xl border border-slate-200/80 bg-white px-5 py-4 shadow-sm">
+      <p className="text-sm font-medium text-slate-600">{label}</p>
+      <p className="text-lg font-bold tabular-nums text-slate-900">
+        {formatMoney(amount, currency)}
+      </p>
     </div>
   )
 }

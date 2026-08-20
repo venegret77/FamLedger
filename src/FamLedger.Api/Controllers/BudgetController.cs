@@ -22,7 +22,8 @@ public class BudgetController(
     IIncomeService incomeService,
     IDebtService debtService,
     ISavingsService savingsService,
-    IGoalService goalService) : ControllerBase
+    IGoalService goalService,
+    IExchangeRateService exchangeRateService) : ControllerBase
 {
     private async Task<(Domain.Entities.BudgetContext Context, Domain.Entities.BudgetPeriod Period)> GetActiveContextAsync(CancellationToken ct)
     {
@@ -223,9 +224,18 @@ public class BudgetController(
     [HttpGet("plan/incomes")]
     public async Task<IActionResult> Incomes(CancellationToken ct)
     {
-        var (context, _) = await GetActiveContextAsync(ct);
+        var (context, period) = await GetActiveContextAsync(ct);
         var items = await incomeService.GetByContextAsync(context.Id, ct);
-        return Ok(items.Select(i => new { i.Id, i.Name, i.Amount, i.Currency, i.SortOrder }));
+        var result = new List<object>();
+        foreach (var i in items)
+        {
+            var baseAmount = i.Currency.Equals(context.BaseCurrency, StringComparison.OrdinalIgnoreCase)
+                ? i.Amount
+                : await exchangeRateService.ConvertToBaseAsync(
+                    i.Amount, i.Currency, period.StartDate, context.Id, period.Id, ct);
+            result.Add(new { i.Id, i.Name, i.Amount, i.Currency, i.SortOrder, baseAmount });
+        }
+        return Ok(result);
     }
 
     public record IncomeRequest(string Name, decimal Amount, string Currency);

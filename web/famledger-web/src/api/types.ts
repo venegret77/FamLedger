@@ -60,6 +60,7 @@ export interface RecurringExpense {
   chargeDayOfMonth: number
   categoryName?: string
   periodAmount?: number
+  plannedBaseAmount?: number
   isPaid?: boolean
   isSkipped?: boolean
 }
@@ -79,6 +80,7 @@ export interface Income {
   amount: number
   currency: string
   sortOrder: number
+  baseAmount?: number
 }
 
 export interface DebtEntry {
