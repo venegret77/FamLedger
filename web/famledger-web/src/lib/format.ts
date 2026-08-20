@@ -1,19 +1,25 @@
 const currencyFormatterCache = new Map<string, Intl.NumberFormat>()
 
+function fractionDigitsFor(currency: string): number {
+  return currency.toUpperCase() === 'RSD' ? 0 : 2
+}
+
 export function formatMoney(
   amount: number,
   currency = 'RSD',
   locale = 'ru-RU',
 ): string {
-  const key = `${locale}:${currency}`
+  const code = currency.toUpperCase()
+  const key = `${locale}:${code}`
   let formatter = currencyFormatterCache.get(key)
 
   if (!formatter) {
+    const digits = fractionDigitsFor(code)
     formatter = new Intl.NumberFormat(locale, {
       style: 'currency',
-      currency,
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
+      currency: code,
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
     })
     currencyFormatterCache.set(key, formatter)
   }
