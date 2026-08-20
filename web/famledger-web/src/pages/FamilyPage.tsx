@@ -7,6 +7,7 @@ import {
   useMe,
   useRegenerateInviteCode,
   useRejectJoinRequest,
+  useRemoveFamilyMember,
   useUpdateMemberRole,
 } from '../api/hooks'
 import type { FamilyMemberRole } from '../api/types'
@@ -14,17 +15,20 @@ import { Card, CardDescription, CardTitle } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 import { Select } from '../components/ui/Input'
 import { EmptyState, PageHeader, Spinner, Badge, Tabs } from '../components/ui/Tabs'
+import { useConfirmDialog } from '../components/ui/ConfirmDialog'
 import { formatDateTime, roleLabel } from '../lib/format'
 import { copyToClipboard } from '../lib/clipboard'
 
 export function FamilyPage() {
   const { data: family, isLoading, isError, refetch } = useFamily()
   const { data: user } = useMe()
+  const { confirm } = useConfirmDialog()
   const createFamily = useCreateFamily()
   const joinFamily = useJoinFamily()
   const approve = useApproveJoinRequest()
   const reject = useRejectJoinRequest()
   const updateRole = useUpdateMemberRole()
+  const removeMember = useRemoveFamilyMember()
   const regenerateInvite = useRegenerateInviteCode()
   const [copied, setCopied] = useState(false)
   const [familyName, setFamilyName] = useState('')
@@ -181,6 +185,26 @@ export function FamilyPage() {
     })
   }
 
+  async function handleRemoveMember(member: {
+    id: string
+    userId: string
+    displayName: string
+  }) {
+    if (!user?.activeContextId) return
+    const leavingSelf = member.userId === user.id
+    const accepted = await confirm({
+      title: leavingSelf ? 'Выйти из семьи?' : `Удалить «${member.displayName}»?`,
+      message: leavingSelf
+        ? 'Вы вернётесь к личному бюджету. Семейные данные останутся у остальных.'
+        : 'Участник потеряет доступ к этому семейному бюджету.',
+    })
+    if (!accepted) return
+    await removeMember.mutateAsync({
+      contextId: user.activeContextId,
+      memberId: member.id,
+    })
+  }
+
   async function handleRegenerate() {
     if (!user?.activeContextId) return
     await regenerateInvite.mutateAsync(user.activeContextId)
@@ -203,31 +227,54 @@ export function FamilyPage() {
           ) : (
             <Card padding="none">
               <ul className="divide-y divide-slate-100">
-                {family.members.map((member) => (
-                  <li key={member.id} className="flex items-center justify-between gap-4 px-5 py-4">
-                    <div>
-                      <p className="font-medium text-slate-900">{member.displayName}</p>
-                      {member.username && (
-                        <p className="text-sm text-slate-500">@{member.username}</p>
-                      )}
-                    </div>
-                    {isHead && member.userId !== user?.id ? (
-                      <Select
-                        value={member.role}
-                        onChange={(e) =>
-                          void handleRoleChange(member.id, e.target.value as FamilyMemberRole)
-                        }
-                        options={[
-                          { value: 'Head', label: 'Глава' },
-                          { value: 'Assistant', label: 'Помощник' },
-                          { value: 'Member', label: 'Участник' },
-                        ]}
-                      />
-                    ) : (
-                      <Badge>{roleLabel(member.role)}</Badge>
-                    )}
-                  </li>
-                ))}
+                {family.members.map((member) => {
+                  const isSelf = member.userId === user?.id
+                  const showRemove =
+                    (isHead && !isSelf) ||
+                    (isSelf && (!isHead || family.members.filter((m) => m.role === 'Head').length > 1))
+
+                  return (
+                    <li key={member.id} className="flex items-center justify-between gap-4 px-5 py-4">
+                      <div>
+                        <p className="font-medium text-slate-900">
+                          {member.displayName}
+                          {isSelf ? ' (вы)' : ''}
+                        </p>
+                        {member.username && (
+                          <p className="text-sm text-slate-500">@{member.username}</p>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap items-center justify-end gap-2">
+                        {isHead && !isSelf ? (
+                          <Select
+                            value={member.role}
+                            onChange={(e) =>
+                              void handleRoleChange(member.id, e.target.value as FamilyMemberRole)
+                            }
+                            options={[
+                              { value: 'Head', label: 'Глава' },
+                              { value: 'Assistant', label: 'Помощник' },
+                              { value: 'Member', label: 'Участник' },
+                            ]}
+                          />
+                        ) : (
+                          <Badge>{roleLabel(member.role)}</Badge>
+                        )}
+                        {showRemove && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-red-600 hover:bg-red-50"
+                            loading={removeMember.isPending}
+                            onClick={() => void handleRemoveMember(member)}
+                          >
+                            {isSelf ? 'Выйти' : 'Удалить'}
+                          </Button>
+                        )}
+                      </div>
+                    </li>
+                  )
+                })}
               </ul>
             </Card>
           )}

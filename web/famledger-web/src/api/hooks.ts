@@ -651,9 +651,27 @@ export function useUpdateMemberRole() {
         method: 'PATCH',
         body: { memberId, role },
       }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.family })
-      void queryClient.invalidateQueries({ queryKey: queryKeys.settings })
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.family, refetchType: 'all' }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.settings, refetchType: 'all' }),
+      ])
+    },
+  })
+}
+
+export function useRemoveFamilyMember() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ contextId, memberId }: { contextId: string; memberId: string }) =>
+      apiFetch<void>(`/api/contexts/${contextId}/members/${memberId}`, { method: 'DELETE' }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.family, refetchType: 'all' }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.me, refetchType: 'all' }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.contexts, refetchType: 'all' }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.settings, refetchType: 'all' }),
+      ])
     },
   })
 }

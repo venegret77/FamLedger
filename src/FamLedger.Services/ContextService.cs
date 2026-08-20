@@ -123,7 +123,49 @@ public class ContextService(AppDbContext db) : IContextService
         if (head?.Role != FamilyMemberRole.Head) throw new UnauthorizedAccessException();
 
         var member = await db.ContextMembers.FindAsync([memberId], ct) ?? throw new InvalidOperationException("Member not found");
+        if (member.ContextId != contextId) throw new InvalidOperationException("Member not found");
         member.Role = role;
+        await db.SaveChangesAsync(ct);
+    }
+
+    public async Task RemoveMemberAsync(Guid contextId, Guid memberId, Guid actorUserId, CancellationToken ct = default)
+    {
+        var context = await db.BudgetContexts.FindAsync([contextId], ct)
+            ?? throw new InvalidOperationException("Context not found");
+        if (context.IsPersonal)
+            throw new InvalidOperationException("Cannot leave a personal budget");
+
+        var actor = await GetMembershipAsync(contextId, actorUserId, ct)
+            ?? throw new UnauthorizedAccessException();
+        var member = await db.ContextMembers.FindAsync([memberId], ct)
+            ?? throw new InvalidOperationException("Member not found");
+        if (member.ContextId != contextId)
+            throw new InvalidOperationException("Member not found");
+
+        var removingSelf = member.UserId == actorUserId;
+        if (!removingSelf && actor.Role != FamilyMemberRole.Head)
+            throw new UnauthorizedAccessException();
+
+        if (member.Role == FamilyMemberRole.Head)
+        {
+            var otherHeads = await db.ContextMembers.CountAsync(
+                m => m.ContextId == contextId && m.Role == FamilyMemberRole.Head && m.Id != member.Id, ct);
+            if (otherHeads == 0)
+                throw new InvalidOperationException("Cannot remove the only head. Assign another head first.");
+        }
+
+        db.ContextMembers.Remove(member);
+
+        var removedUser = await db.Users.FindAsync([member.UserId], ct);
+        if (removedUser?.ActiveContextId == contextId)
+        {
+            var personalId = await db.ContextMembers
+                .Where(m => m.UserId == member.UserId && m.Context.IsPersonal)
+                .Select(m => (Guid?)m.ContextId)
+                .FirstOrDefaultAsync(ct);
+            removedUser.ActiveContextId = personalId;
+        }
+
         await db.SaveChangesAsync(ct);
     }
 

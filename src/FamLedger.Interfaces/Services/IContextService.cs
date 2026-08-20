@@ -15,6 +15,7 @@ public interface IContextService
     Task<IReadOnlyList<JoinRequest>> GetPendingRequestsAsync(Guid contextId, CancellationToken ct = default);
     Task<IReadOnlyList<ContextMember>> GetMembersAsync(Guid contextId, CancellationToken ct = default);
     Task UpdateMemberRoleAsync(Guid contextId, Guid memberId, FamilyMemberRole role, Guid headUserId, CancellationToken ct = default);
+    Task RemoveMemberAsync(Guid contextId, Guid memberId, Guid actorUserId, CancellationToken ct = default);
     Task UpdateSettingsAsync(Guid contextId, int periodStartDay, string baseCurrency, Guid userId, CancellationToken ct = default);
     Task<string> RegenerateInviteCodeAsync(Guid contextId, Guid userId, CancellationToken ct = default);
     Task<IReadOnlyList<BudgetContext>> GetUserContextsAsync(Guid userId, CancellationToken ct = default);

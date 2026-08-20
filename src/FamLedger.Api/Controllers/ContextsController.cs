@@ -105,4 +105,22 @@ public class ContextsController(IContextService contextService, IUserService use
         await contextService.UpdateMemberRoleAsync(contextId, request.MemberId, request.Role, User.GetUserId(), ct);
         return Ok();
     }
+
+    [HttpDelete("{contextId:guid}/members/{memberId:guid}")]
+    public async Task<IActionResult> RemoveMember(Guid contextId, Guid memberId, CancellationToken ct)
+    {
+        try
+        {
+            await contextService.RemoveMemberAsync(contextId, memberId, User.GetUserId(), ct);
+            return Ok();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
 }
