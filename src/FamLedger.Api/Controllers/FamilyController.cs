@@ -71,14 +71,14 @@ public class FamilyController(
             inviteCode = context.InviteCode,
             context.PeriodStartDay,
             context.BaseCurrency,
-            myRole = membership?.Role,
+            myRole = membership?.Role.ToString(),
             members = members.Select(m => new
             {
                 m.Id,
                 m.UserId,
                 displayName = m.User.DisplayName ?? m.User.FirstName ?? "User",
                 username = m.User.Username,
-                m.Role,
+                role = m.Role.ToString(),
                 m.JoinedAt
             }),
             joinRequests = requests.Select(r => new

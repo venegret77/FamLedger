@@ -173,9 +173,13 @@ export function useCreateFamily() {
         method: 'POST',
         body: { name },
       }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.family })
-      void queryClient.invalidateQueries({ queryKey: queryKeys.me })
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.family, refetchType: 'all' }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.me, refetchType: 'all' }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.contexts, refetchType: 'all' }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.settings, refetchType: 'all' }),
+      ])
     },
   })
 }
