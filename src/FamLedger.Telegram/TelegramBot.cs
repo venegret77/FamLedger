@@ -70,7 +70,14 @@ public class TelegramBot(
                 }
 
                 await client.SendMessage(chatId,
-                    $"Привет, {user.DisplayName ?? user.FirstName}! Отправь сумму расхода, например: 1000\n\nДля входа на сайт: /start login",
+                    $"Привет, {user.DisplayName ?? user.FirstName}!\n\n" +
+                    "Отправь сумму расхода, например:\n" +
+                    "• 1000\n" +
+                    "• 10 usd / 10eur\n" +
+                    "• 15 eur / €15\n" +
+                    "• $20\n\n" +
+                    "Без валюты считается в динарах (RSD).\n\n" +
+                    "Для входа на сайт: /start login",
                     cancellationToken: ct);
                 return;
             }
@@ -114,7 +121,9 @@ public class TelegramBot(
                 return;
             }
 
-            await client.SendMessage(chatId, "Отправь сумму расхода или /start", cancellationToken: ct);
+            await client.SendMessage(chatId,
+                "Отправь сумму, например: 1000, 10 usd, 15 eur, $20 — или /start",
+                cancellationToken: ct);
         }
 
         if (update.CallbackQuery is { Data: not null } cb)
