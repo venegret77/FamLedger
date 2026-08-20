@@ -580,13 +580,9 @@ export function useUploadAvatar() {
       form.append('file', file)
       return apiUpload<{ avatarUrl: string }>('/api/users/me/avatar', form)
     },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.me })
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.me, refetchType: 'all' })
     },
-  })
-}
-
-export function useDeleteTransaction() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (id: string) =>

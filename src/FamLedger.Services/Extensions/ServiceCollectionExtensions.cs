@@ -18,6 +18,9 @@ public static class ServiceCollectionExtensions
         {
             options.TelegramBotToken = configuration["TELEGRAM_BOT_TOKEN"] ?? configuration["App:TelegramBotToken"] ?? string.Empty;
             options.JwtSecret = configuration["JWT_SECRET"] ?? configuration["App:JwtSecret"] ?? options.JwtSecret;
+            options.MinioAccessKey = configuration["MINIO_ROOT_USER"] ?? configuration["App:MinioAccessKey"] ?? options.MinioAccessKey;
+            options.MinioSecretKey = configuration["MINIO_ROOT_PASSWORD"] ?? configuration["App:MinioSecretKey"] ?? options.MinioSecretKey;
+            options.MinioBucket = configuration["MINIO_BUCKET"] ?? configuration["App:MinioBucket"] ?? options.MinioBucket;
             options.WebPublicUrl = configuration["WEB_PUBLIC_URL"]
                 ?? configuration["WEB_ORIGIN"]
                 ?? configuration["App:WebPublicUrl"]

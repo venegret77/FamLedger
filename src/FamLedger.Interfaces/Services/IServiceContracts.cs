@@ -102,8 +102,9 @@ public interface IAuthService
 
 public interface IFileStorageService
 {
-    Task<string> UploadAvatarAsync(Guid userId, Stream stream, string contentType, CancellationToken ct = default);
+    Task<string> UploadAvatarAsync(Guid userId, Stream stream, string contentType, long size, CancellationToken ct = default);
     Task<string?> GetAvatarUrlAsync(string? avatarKey, CancellationToken ct = default);
+    Task<(Stream Stream, string ContentType)?> OpenReadAsync(string objectKey, CancellationToken ct = default);
 }
 
 public interface INotificationService

@@ -127,8 +127,22 @@ export function SettingsPage() {
 
   async function handleAvatarChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
+    event.target.value = ''
     if (!file) return
-    await uploadAvatar.mutateAsync(file)
+    const maxBytes = 2 * 1024 * 1024
+    if (file.size > maxBytes) {
+      window.alert('Аватар не больше 2 МБ')
+      return
+    }
+    if (!file.type.startsWith('image/')) {
+      window.alert('Нужен файл изображения')
+      return
+    }
+    try {
+      await uploadAvatar.mutateAsync(file)
+    } catch {
+      window.alert('Не удалось загрузить аватар')
+    }
   }
 
   if (isLoading) {
@@ -177,9 +191,15 @@ export function SettingsPage() {
             )}
             <label className="cursor-pointer text-sm font-medium text-brand-600 hover:text-brand-700">
               Загрузить аватар
-              <input type="file" accept="image/*" className="hidden" onChange={(e) => void handleAvatarChange(e)} />
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/gif"
+                className="hidden"
+                onChange={(e) => void handleAvatarChange(e)}
+              />
             </label>
           </div>
+          <p className="text-xs text-slate-500">JPEG, PNG, WebP или GIF · до 2 МБ</p>
           <Input
             label="Отображаемое имя"
             value={displayName}
