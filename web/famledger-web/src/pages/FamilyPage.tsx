@@ -14,6 +14,7 @@ import { Button } from '../components/ui/Button'
 import { Select } from '../components/ui/Input'
 import { EmptyState, PageHeader, Spinner, Badge } from '../components/ui/Tabs'
 import { formatDateTime, roleLabel } from '../lib/format'
+import { copyToClipboard } from '../lib/clipboard'
 
 export function FamilyPage() {
   const { data: family, isLoading, isError, refetch } = useFamily()
@@ -31,7 +32,8 @@ export function FamilyPage() {
 
   async function copyInviteCode() {
     if (!family?.inviteCode) return
-    await navigator.clipboard.writeText(family.inviteCode)
+    const ok = await copyToClipboard(family.inviteCode)
+    if (!ok) return
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
