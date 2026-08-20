@@ -22,9 +22,24 @@ type TelegramWidgetUser = {
   hash: string
 }
 
-declare global {
-  interface Window {
-    onTelegramAuth?: (user: TelegramWidgetUser) => void
+function parseTelegramAuthFromUrl(search: string, hash: string): TelegramWidgetUser | null {
+  const fromSearch = new URLSearchParams(search)
+  const fromHash = new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash)
+  const params = fromSearch.get('hash') ? fromSearch : fromHash
+
+  const id = params.get('id')
+  const authHash = params.get('hash')
+  const authDate = params.get('auth_date')
+  if (!id || !authHash || !authDate) return null
+
+  return {
+    id: Number(id),
+    first_name: params.get('first_name') ?? undefined,
+    last_name: params.get('last_name') ?? undefined,
+    username: params.get('username') ?? undefined,
+    photo_url: params.get('photo_url') ?? undefined,
+    auth_date: Number(authDate),
+    hash: authHash,
   }
 }
 
@@ -62,10 +77,10 @@ async function exchangeTelegramWidget(
     credentials: 'include',
     body: JSON.stringify({
       id: user.id,
-      firstName: user.first_name,
-      lastName: user.last_name,
-      username: user.username,
-      photoUrl: user.photo_url,
+      firstName: user.first_name ?? null,
+      lastName: user.last_name ?? null,
+      username: user.username ?? null,
+      photoUrl: user.photo_url ?? null,
       authDate: user.auth_date,
       hash: user.hash,
     }),
@@ -90,8 +105,9 @@ export function LoginPage() {
   const widgetHostRef = useRef<HTMLDivElement>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [showCodeFallback, setShowCodeFallback] = useState(false)
   const [manualToken, setManualToken] = useState('')
+  const [botOpened, setBotOpened] = useState(false)
+  const handledRedirect = useRef(false)
 
   const from = (location.state as { from?: string } | null)?.from ?? '/'
   const botLoginUrl = BOT_USERNAME ? `https://t.me/${BOT_USERNAME}?start=login` : null
@@ -102,19 +118,33 @@ export function LoginPage() {
     try {
       await action()
       navigate(from, { replace: true })
+      return true
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось войти')
+      return false
     } finally {
       setLoading(false)
     }
   }
 
+  // Telegram Login Widget redirect: /login?id=...&hash=...
+  useEffect(() => {
+    if (handledRedirect.current) return
+    const user = parseTelegramAuthFromUrl(location.search, location.hash)
+    if (!user) return
+    handledRedirect.current = true
+    void (async () => {
+      const ok = await finish(() => exchangeTelegramWidget(user, queryClient))
+      if (!ok) {
+        handledRedirect.current = false
+        navigate('/login', { replace: true })
+      }
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search, location.hash])
+
   useEffect(() => {
     if (!BOT_USERNAME || !widgetHostRef.current) return
-
-    window.onTelegramAuth = (user) => {
-      void finish(() => exchangeTelegramWidget(user, queryClient))
-    }
 
     const host = widgetHostRef.current
     host.innerHTML = ''
@@ -124,16 +154,15 @@ export function LoginPage() {
     script.setAttribute('data-telegram-login', BOT_USERNAME)
     script.setAttribute('data-size', 'large')
     script.setAttribute('data-radius', '12')
-    script.setAttribute('data-onauth', 'onTelegramAuth(user)')
     script.setAttribute('data-request-access', 'write')
+    // Редирект надёжнее data-onauth: Telegram вернёт на /login?id=&hash=
+    script.setAttribute('data-auth-url', `${window.location.origin}/login`)
     host.appendChild(script)
 
     return () => {
-      delete window.onTelegramAuth
       host.innerHTML = ''
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount once per bot username
-  }, [BOT_USERNAME, queryClient])
+  }, [BOT_USERNAME])
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-brand-50 via-white to-slate-100 px-4 py-12">
@@ -148,66 +177,72 @@ export function LoginPage() {
 
         <Card className="shadow-md">
           <CardTitle>Вход</CardTitle>
-          <CardDescription>Через Telegram — одним нажатием.</CardDescription>
+          <CardDescription>
+            Открой Telegram — бот пришлёт код. Либо войди через браузер ниже.
+          </CardDescription>
 
           <div className="mt-6 space-y-4">
-            {BOT_USERNAME ? (
+            {BOT_USERNAME && botLoginUrl ? (
               <>
-                <div className="flex min-h-[44px] justify-center" ref={widgetHostRef} />
+                <a
+                  href={botLoginUrl}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700"
+                  onClick={() => setBotOpened(true)}
+                >
+                  <TelegramIcon />
+                  Открыть Telegram
+                </a>
+
+                {(botOpened || manualToken.length > 0) && (
+                  <p className="rounded-xl border border-brand-200 bg-brand-50 px-4 py-3 text-sm text-brand-900">
+                    В боте: Start → скопируй код → вставь ниже.
+                  </p>
+                )}
+
+                <form
+                  className="flex gap-2"
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    const token = manualToken.trim()
+                    if (token) void finish(() => exchangeBotToken(token, queryClient))
+                  }}
+                >
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={manualToken}
+                    onChange={(e) => setManualToken(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    placeholder="Код из бота"
+                    className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+                    disabled={loading}
+                    autoComplete="one-time-code"
+                    spellCheck={false}
+                  />
+                  <Button
+                    type="submit"
+                    variant="secondary"
+                    disabled={loading || manualToken.trim().length < 4}
+                  >
+                    Войти
+                  </Button>
+                </form>
 
                 {loading && (
                   <p className="text-center text-sm text-slate-500">Входим…</p>
                 )}
 
-                <button
-                  type="button"
-                  className="w-full text-center text-sm text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline"
-                  onClick={() => setShowCodeFallback((v) => !v)}
-                >
-                  {showCodeFallback ? 'Скрыть вход по коду' : 'Войти кодом из бота'}
-                </button>
+                <div className="relative flex items-center gap-3 py-1">
+                  <div className="h-px flex-1 bg-slate-200" />
+                  <span className="text-xs text-slate-400">или</span>
+                  <div className="h-px flex-1 bg-slate-200" />
+                </div>
 
-                {showCodeFallback && (
-                  <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                    {botLoginUrl && (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        className="w-full"
-                        onClick={() => window.open(botLoginUrl, '_blank', 'noopener,noreferrer')}
-                      >
-                        <TelegramIcon />
-                        Открыть бота (/start login)
-                      </Button>
-                    )}
-                    <form
-                      className="flex gap-2"
-                      onSubmit={(e) => {
-                        e.preventDefault()
-                        const token = manualToken.trim()
-                        if (token) void finish(() => exchangeBotToken(token, queryClient))
-                      }}
-                    >
-                      <input
-                        type="text"
-                        value={manualToken}
-                        onChange={(e) => setManualToken(e.target.value)}
-                        placeholder="Код из бота"
-                        className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
-                        disabled={loading}
-                        autoComplete="off"
-                        spellCheck={false}
-                      />
-                      <Button
-                        type="submit"
-                        variant="secondary"
-                        disabled={loading || !manualToken.trim()}
-                      >
-                        Войти
-                      </Button>
-                    </form>
-                  </div>
-                )}
+                <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-center text-sm font-medium text-slate-700">
+                    Войти через браузер
+                  </p>
+                  <div className="flex min-h-[44px] justify-center" ref={widgetHostRef} />
+                </div>
               </>
             ) : (
               <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">

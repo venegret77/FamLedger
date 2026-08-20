@@ -29,11 +29,23 @@ builder.Services.AddCors(options =>
     {
         policy.WithOrigins(
                 builder.Configuration["WEB_ORIGIN"] ?? "http://localhost:5173",
+                "https://fam-ledger.com",
+                "https://www.fam-ledger.com",
                 "http://localhost:3000")
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();
     });
+});
+
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders =
+        Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor |
+        Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto;
+    // За Cloudflare / Caddy
+    options.KnownNetworks.Clear();
+    options.KnownProxies.Clear();
 });
 
 builder.Services.AddHealthChecks()
@@ -61,6 +73,7 @@ using (var scope = app.Services.CreateScope())
 if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 
+app.UseForwardedHeaders();
 app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
