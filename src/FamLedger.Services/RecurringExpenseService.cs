@@ -44,14 +44,25 @@ public class RecurringExpenseService(
         return expense;
     }
 
-    public Task<IReadOnlyList<PeriodRecurringItem>> GetPeriodItemsAsync(Guid periodId, CancellationToken ct = default) =>
-        db.PeriodRecurringItems
+    public async Task<IReadOnlyList<PeriodRecurringItem>> GetPeriodItemsAsync(Guid periodId, CancellationToken ct = default)
+    {
+        var periodStartDay = await db.BudgetPeriods
+            .AsNoTracking()
+            .Where(p => p.Id == periodId)
+            .Select(p => p.Context.PeriodStartDay)
+            .FirstOrDefaultAsync(ct);
+        var startDay = Math.Clamp(periodStartDay == 0 ? 15 : periodStartDay, 1, 28);
+
+        var items = await db.PeriodRecurringItems
             .Include(i => i.RecurringExpense)
             .Where(i => i.PeriodId == periodId)
-            .OrderBy(i => i.RecurringExpense.ChargeDayOfMonth)
-            .ThenBy(i => i.RecurringExpense.Name)
-            .ToListAsync(ct)
-            .ContinueWith(t => (IReadOnlyList<PeriodRecurringItem>)t.Result, ct);
+            .ToListAsync(ct);
+
+        return items
+            .OrderBy(i => (i.RecurringExpense.ChargeDayOfMonth - startDay + 28) % 28)
+            .ThenBy(i => i.RecurringExpense.Name, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+    }
 
     public async Task TogglePaidAsync(Guid itemId, Guid userId, CancellationToken ct = default)
     {
