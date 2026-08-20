@@ -1,24 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
-import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import { useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { queryKeys } from '../api/hooks'
 import { Card, CardDescription, CardTitle } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
-
-declare global {
-  interface Window {
-    onTelegramAuth?: (user: TelegramUser) => void
-  }
-}
-
-interface TelegramUser {
-  id: number
-  first_name?: string
-  username?: string
-  photo_url?: string
-  auth_date: number
-  hash: string
-}
 
 const API_URL =
   import.meta.env.VITE_API_URL === ''
@@ -38,8 +23,15 @@ async function exchangeBotToken(
     body: JSON.stringify({ token }),
   })
   if (!res.ok) {
-    const body = await res.text()
-    throw new Error(body || `Ошибка ${res.status}`)
+    let message = `Ошибка ${res.status}`
+    try {
+      const body = await res.json() as { message?: string }
+      if (body.message) message = body.message
+    } catch {
+      const text = await res.text()
+      if (text) message = text
+    }
+    throw new Error(message)
   }
   await queryClient.invalidateQueries({ queryKey: queryKeys.me })
 }
@@ -47,9 +39,7 @@ async function exchangeBotToken(
 export function LoginPage() {
   const navigate = useNavigate()
   const location = useLocation()
-  const [searchParams, setSearchParams] = useSearchParams()
   const queryClient = useQueryClient()
-  const widgetRef = useRef<HTMLDivElement>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [botLoginHint, setBotLoginHint] = useState(false)
@@ -63,7 +53,6 @@ export function LoginPage() {
     setError(null)
     try {
       await exchangeBotToken(token, queryClient)
-      setSearchParams({}, { replace: true })
       navigate(from, { replace: true })
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Код для входа недействителен')
@@ -71,69 +60,6 @@ export function LoginPage() {
       setLoading(false)
     }
   }
-
-  useEffect(() => {
-    const token = searchParams.get('token')
-    if (!token) return
-
-    let cancelled = false
-    void completeLogin(token).finally(() => {
-      if (!cancelled) setLoading(false)
-    })
-
-    return () => {
-      cancelled = true
-    }
-  }, [searchParams, setSearchParams, navigate, from, queryClient])
-
-  useEffect(() => {
-    window.onTelegramAuth = async (user: TelegramUser) => {
-      setLoading(true)
-      setError(null)
-      try {
-        const res = await fetch(`${API_URL}/api/auth/telegram`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({
-            id: user.id,
-            firstName: user.first_name,
-            username: user.username,
-            photoUrl: user.photo_url,
-            authDate: user.auth_date,
-            hash: user.hash,
-          }),
-        })
-        if (!res.ok) {
-          const body = await res.text()
-          throw new Error(body || `Ошибка ${res.status}`)
-        }
-        await queryClient.invalidateQueries({ queryKey: queryKeys.me })
-        navigate(from, { replace: true })
-      } catch (e) {
-        setError(e instanceof Error ? e.message : 'Не удалось войти')
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    if (!widgetRef.current || !BOT_USERNAME) return
-
-    widgetRef.current.innerHTML = ''
-    const script = document.createElement('script')
-    script.src = 'https://telegram.org/js/telegram-widget.js?22'
-    script.async = true
-    script.setAttribute('data-telegram-login', BOT_USERNAME)
-    script.setAttribute('data-size', 'large')
-    script.setAttribute('data-radius', '8')
-    script.setAttribute('data-onauth', 'onTelegramAuth(user)')
-    script.setAttribute('data-request-access', 'write')
-    widgetRef.current.appendChild(script)
-
-    return () => {
-      delete window.onTelegramAuth
-    }
-  }, [navigate, from, queryClient])
 
   const handleBotLogin = () => {
     if (!botLoginUrl) return
@@ -155,7 +81,7 @@ export function LoginPage() {
         <Card className="shadow-md">
           <CardTitle>Вход</CardTitle>
           <CardDescription>
-            Для локальной разработки используйте вход через бота — домен в BotFather не нужен.
+            Открой бота, получи код и вставь его ниже.
           </CardDescription>
 
           <div className="mt-6 space-y-4">
@@ -174,7 +100,7 @@ export function LoginPage() {
 
                 {botLoginHint && (
                   <p className="rounded-xl border border-brand-200 bg-brand-50 px-4 py-3 text-sm text-brand-900">
-                    Скопируй код из бота, вставь ниже и нажми «Войти».
+                    В боте: /start login → скопируй код → вставь ниже → «Войти».
                   </p>
                 )}
 
@@ -193,25 +119,14 @@ export function LoginPage() {
                     placeholder="Код из бота"
                     className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
                     disabled={loading}
+                    autoComplete="off"
+                    spellCheck={false}
                   />
                   <Button type="submit" variant="secondary" disabled={loading || !manualToken.trim()}>
                     Войти
                   </Button>
                 </form>
 
-                <div className="relative py-2">
-                  <div className="absolute inset-0 flex items-center">
-                    <div className="w-full border-t border-slate-200" />
-                  </div>
-                  <div className="relative flex justify-center text-xs uppercase">
-                    <span className="bg-white px-2 text-slate-400">или виджет (нужен домен)</span>
-                  </div>
-                </div>
-
-                <div
-                  ref={widgetRef}
-                  className="flex min-h-[52px] items-center justify-center"
-                />
                 {loading && (
                   <p className="text-center text-sm text-slate-500">Входим…</p>
                 )}
@@ -232,10 +147,6 @@ export function LoginPage() {
               </p>
             )}
           </div>
-
-          <p className="mt-6 text-center text-xs text-slate-400">
-            Виджет «Log in with Telegram» работает только с публичным доменом (не localhost).
-          </p>
         </Card>
       </div>
     </div>

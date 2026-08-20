@@ -24,7 +24,7 @@ services:
       ConnectionStrings__DefaultConnection: Host=postgres;Port=5432;Database=${POSTGRES_DB:-famledger};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-postgres}
       Redis__ConnectionString: redis:6379
       App__MinioEndpoint: minio:9000
-      WEB_ORIGIN: http://localhost:5173
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:5173}
     ports:
       - "8080:8080"
     networks:

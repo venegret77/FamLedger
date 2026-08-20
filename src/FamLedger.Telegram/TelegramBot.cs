@@ -50,16 +50,16 @@ public class TelegramBot(
         if (update.Message is { Text: not null } msg)
         {
             var chatId = msg.Chat.Id;
-            var user = await userService.GetOrCreateByTelegramAsync(chatId, msg.From?.Username, msg.From?.FirstName, ct);
+            var telegramUserId = msg.From?.Id ?? chatId;
+            var user = await userService.GetOrCreateByTelegramAsync(telegramUserId, msg.From?.Username, msg.From?.FirstName, ct);
 
             if (ParseCommand(msg.Text) is ("/start", var payload))
             {
                 if (payload.StartsWith("login", StringComparison.OrdinalIgnoreCase))
                 {
-                    var token = await loginTokenService.CreateAsync(chatId, ct);
+                    var token = await loginTokenService.CreateAsync(telegramUserId, ct);
                     await client.SendMessage(chatId,
-                        $"Код для входа (10 мин):\n`{token}`",
-                        parseMode: ParseMode.Markdown,
+                        $"Код для входа (10 мин):\n{token}",
                         cancellationToken: ct);
                     return;
                 }

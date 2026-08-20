@@ -26,10 +26,11 @@ public class AuthController(IAuthService authService, ILoginTokenService loginTo
     [HttpPost("bot")]
     public async Task<IActionResult> BotLogin([FromBody] BotLoginRequest request, CancellationToken ct)
     {
-        var telegramId = await loginTokenService.ConsumeAsync(request.Token, ct)
-            ?? throw new UnauthorizedAccessException("Invalid or expired login link");
+        var telegramId = await loginTokenService.ConsumeAsync(request.Token, ct);
+        if (telegramId is null)
+            return Unauthorized(new { message = "Код недействителен или уже использован. Запроси новый в боте (/start login)." });
 
-        var jwt = await authService.AuthenticateByTelegramUserAsync(telegramId, null, null, ct);
+        var jwt = await authService.AuthenticateByTelegramUserAsync(telegramId.Value, null, null, ct);
         AppendAuthCookie(jwt);
         return Ok(new { success = true });
     }
