@@ -104,9 +104,22 @@ export interface Debt {
 
 export interface SavingsResponse {
   balance: number
-  current: { plannedAmount: number; actualAmount: number }
+  baseCurrency?: string
+  current: {
+    plannedAmount: number
+    plannedCurrency?: string
+    plannedBaseAmount?: number
+    actualAmount?: number
+    actualBaseAmount?: number
+    actualByCurrency?: SavingsAmountByCurrency[]
+  }
   plans: SavingsEntry[]
   goals: SavingsGoal[]
+}
+
+export interface SavingsAmountByCurrency {
+  amount: number
+  currency: string
 }
 
 export interface SavingsGoal {
@@ -121,11 +134,15 @@ export interface SavingsGoal {
 export interface SavingsEntry {
   id: string
   plannedAmount: number
+  plannedCurrency?: string
+  plannedBaseAmount?: number
   actualAmount: number
+  actualBaseAmount?: number
   currency: string
   periodLabel?: string
   periodStart?: string
   periodEnd?: string
+  actualByCurrency?: SavingsAmountByCurrency[]
 }
 
 export interface FamilyMember {

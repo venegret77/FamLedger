@@ -341,33 +341,48 @@ public class BudgetController(
         var entry = await savingsService.GetOrCreateForPeriodAsync(context.Id, period.Id, ct);
         var plans = await savingsService.GetPlansAsync(context.Id, ct);
         var goals = await goalService.GetByContextAsync(context.Id, ct);
+        var currentPlan = plans.FirstOrDefault(p => p.Id == entry.Id);
         return Ok(new
         {
             balance,
-            current = new { entry.PlannedAmount, entry.ActualAmount },
+            baseCurrency = context.BaseCurrency,
+            current = new
+            {
+                plannedAmount = entry.PlannedAmount,
+                plannedCurrency = entry.PlannedCurrency,
+                plannedBaseAmount = currentPlan?.PlannedBaseAmount ?? 0,
+                actualBaseAmount = currentPlan?.ActualBaseAmount ?? 0,
+                actualByCurrency = currentPlan?.ActualByCurrency ?? []
+            },
             plans = plans.Select(p => new
             {
                 p.Id,
                 p.PlannedAmount,
-                p.ActualAmount,
+                p.PlannedCurrency,
+                p.PlannedBaseAmount,
+                actualAmount = p.ActualBaseAmount,
+                actualBaseAmount = p.ActualBaseAmount,
                 p.Currency,
-                PeriodLabel = p.Period?.Label,
-                PeriodStart = p.Period?.StartDate,
-                PeriodEnd = p.Period?.EndDate
+                p.PeriodLabel,
+                p.PeriodStart,
+                p.PeriodEnd,
+                actualByCurrency = p.ActualByCurrency
             }),
-            goals = goals.Select(g => new
+            goals = await Task.WhenAll(goals.Select(async g => new
             {
                 g.Id,
                 g.Name,
                 g.TargetAmount,
                 g.Currency,
                 g.IsCompleted,
-                Progress = g.Contributions.Sum(c => c.Amount)
-            })
+                Progress = await goalService.GetProgressFromSavingsAsync(
+                    context.Id, g.Currency, balance, ct)
+            }))
         });
     }
 
     public record SavingsDepositRequest(decimal Amount, string? Currency);
+    public record SavingsWithdrawRequest(decimal Amount, string? Currency);
     public record SavingsPlanRequest(decimal PlannedAmount, string? Currency);
     public record GoalRequest(string Name, decimal TargetAmount, string? Currency);
     public record GoalContributeRequest(decimal Amount, string? Currency);
@@ -383,6 +398,30 @@ public class BudgetController(
             request.Currency ?? context.BaseCurrency,
             User.GetUserId(),
             ct);
+        await goalService.RefreshCompletionFromSavingsAsync(context.Id, ct);
+        return Ok();
+    }
+
+    [HttpPost("savings/withdraw")]
+    public async Task<IActionResult> Withdraw([FromBody] SavingsWithdrawRequest request, CancellationToken ct)
+    {
+        var (context, period) = await GetActiveContextAsync(ct);
+        try
+        {
+            await savingsService.WithdrawAsync(
+                context.Id,
+                period.Id,
+                request.Amount,
+                request.Currency ?? context.BaseCurrency,
+                User.GetUserId(),
+                ct);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+
+        await goalService.RefreshCompletionFromSavingsAsync(context.Id, ct);
         return Ok();
     }
 

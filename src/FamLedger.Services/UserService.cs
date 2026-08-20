@@ -1,12 +1,12 @@
-using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
 using FamLedger.Common;
 using FamLedger.Domain.Entities;
 using FamLedger.Domain.Enums;
 using FamLedger.Interfaces.Services;
 using FamLedger.Repository;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 
 namespace FamLedger.Services;
 
@@ -86,6 +86,17 @@ public class UserService(AppDbContext db, IRedisService redis) : IUserService
             UserId = user.Id,
             Role = FamilyMemberRole.Head
         });
+        foreach (var (name, kind, order) in DefaultCategories.Items)
+        {
+            db.Categories.Add(new Category
+            {
+                ContextId = context.Id,
+                Name = name,
+                Kind = kind,
+                SortOrder = order,
+                IsDefault = true
+            });
+        }
         await db.SaveChangesAsync(ct);
         return context;
     }

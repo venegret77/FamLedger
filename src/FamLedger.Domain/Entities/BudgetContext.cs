@@ -20,5 +20,6 @@ public class BudgetContext
     public ICollection<Income> Incomes { get; set; } = new List<Income>();
     public ICollection<Debt> Debts { get; set; } = new List<Debt>();
     public ICollection<SavingsEntry> SavingsEntries { get; set; } = new List<SavingsEntry>();
+    public ICollection<SavingsDeposit> SavingsDeposits { get; set; } = new List<SavingsDeposit>();
     public ICollection<Goal> Goals { get; set; } = new List<Goal>();
 }

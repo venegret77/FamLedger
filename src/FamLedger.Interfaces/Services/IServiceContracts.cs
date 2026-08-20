@@ -79,10 +79,25 @@ public interface ISavingsService
 {
     Task<SavingsEntry> GetOrCreateForPeriodAsync(Guid contextId, Guid periodId, CancellationToken ct = default);
     Task AddDepositAsync(Guid contextId, Guid periodId, decimal amount, string currency, Guid userId, CancellationToken ct = default);
+    Task WithdrawAsync(Guid contextId, Guid periodId, decimal amount, string currency, Guid userId, CancellationToken ct = default);
     Task SetPlanAsync(Guid contextId, Guid periodId, decimal plannedAmount, string currency, Guid userId, CancellationToken ct = default);
     Task<decimal> GetTotalBalanceAsync(Guid contextId, CancellationToken ct = default);
-    Task<IReadOnlyList<SavingsEntry>> GetPlansAsync(Guid contextId, CancellationToken ct = default);
+    Task<IReadOnlyList<SavingsPeriodView>> GetPlansAsync(Guid contextId, CancellationToken ct = default);
 }
+
+public record SavingsAmountByCurrency(decimal Amount, string Currency);
+
+public record SavingsPeriodView(
+    Guid Id,
+    decimal PlannedAmount,
+    string PlannedCurrency,
+    decimal PlannedBaseAmount,
+    decimal ActualBaseAmount,
+    string Currency,
+    string? PeriodLabel,
+    DateOnly? PeriodStart,
+    DateOnly? PeriodEnd,
+    IReadOnlyList<SavingsAmountByCurrency> ActualByCurrency);
 
 public interface IGoalService
 {
@@ -91,6 +106,8 @@ public interface IGoalService
     Task<IReadOnlyList<Goal>> GetByContextAsync(Guid contextId, CancellationToken ct = default);
     Task DeleteAsync(Guid goalId, Guid userId, CancellationToken ct = default);
     Task CheckAndNotifyCompletedAsync(Guid goalId, CancellationToken ct = default);
+    Task<decimal> GetProgressFromSavingsAsync(Guid contextId, string goalCurrency, decimal balanceInBase, CancellationToken ct = default);
+    Task RefreshCompletionFromSavingsAsync(Guid contextId, CancellationToken ct = default);
 }
 
 public interface IAuthService

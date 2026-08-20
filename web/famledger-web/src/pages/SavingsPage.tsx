@@ -1,6 +1,5 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import {
-  useContributeGoal,
   useCreateGoal,
   useDeleteGoal,
   useDepositSavings,
@@ -8,6 +7,7 @@ import {
   useSavings,
   useSetSavingsPlan,
   useSettings,
+  useWithdrawSavings,
 } from '../api/hooks'
 import type { SavingsEntry } from '../api/types'
 import { currencyOptions } from '../api/types'
@@ -17,6 +17,7 @@ import { Button } from '../components/ui/Button'
 import { useConfirmDialog } from '../components/ui/ConfirmDialog'
 import { Input, Select } from '../components/ui/Input'
 import { formatMoney } from '../lib/format'
+import { ApiError } from '../api/client'
 
 const savingsTabs = [
   { id: 'actual', label: 'Фактическое' },
@@ -43,37 +44,39 @@ export function SavingsPage() {
   const createGoal = useCreateGoal()
   const deleteGoal = useDeleteGoal()
   const deposit = useDepositSavings()
+  const withdraw = useWithdrawSavings()
   const setPlan = useSetSavingsPlan()
-  const contribute = useContributeGoal()
 
   const [goalName, setGoalName] = useState('')
   const [goalTarget, setGoalTarget] = useState('')
   const [goalCurrency, setGoalCurrency] = useState('')
+  const [movementMode, setMovementMode] = useState<'deposit' | 'withdraw'>('deposit')
   const [depositAmount, setDepositAmount] = useState('')
   const [depositCurrency, setDepositCurrency] = useState('')
   const [planAmount, setPlanAmount] = useState('')
   const [planCurrency, setPlanCurrency] = useState('')
-  const [contributeGoalId, setContributeGoalId] = useState('')
-  const [contributeAmount, setContributeAmount] = useState('')
-  const [contributeCurrency, setContributeCurrency] = useState('')
+  const [movementError, setMovementError] = useState('')
 
   const plans = Array.isArray(data?.plans) ? data.plans : []
   const goals = Array.isArray(data?.goals) ? data.goals : []
-  const currency = settings?.baseCurrency ?? plans[0]?.currency ?? 'RSD'
+  const currency = settings?.baseCurrency ?? data?.baseCurrency ?? plans[0]?.currency ?? 'RSD'
   const depositCurrencyValue = depositCurrency || currency
   const planCurrencyValue = planCurrency || currency
   const goalCurrencyValue = goalCurrency || currency
-  const contributeCurrencyValue = contributeCurrency || currency
 
   const totals = useMemo(
+    () => ({
+      actual: data?.balance ?? plans.reduce((sum, e) => sum + (e.actualBaseAmount ?? e.actualAmount ?? 0), 0),
+      planned: plans.reduce((sum, e) => sum + (e.plannedBaseAmount ?? 0), 0),
+    }),
+    [data?.balance, plans],
+  )
+
+  const periodsWithDeposits = useMemo(
     () =>
-      plans.reduce(
-        (acc, entry) => ({
-          actual: acc.actual + (entry.actualAmount ?? 0),
-          planned: acc.planned + (entry.plannedAmount ?? 0),
-        }),
-        { actual: 0, planned: 0 },
-      ),
+      [...plans]
+        .filter((p) => (p.actualByCurrency?.length ?? 0) > 0 || (p.actualBaseAmount ?? p.actualAmount) > 0)
+        .reverse(),
     [plans],
   )
 
@@ -91,12 +94,26 @@ export function SavingsPage() {
     setGoalTarget('')
   }
 
-  async function handleDeposit(event: FormEvent) {
+  async function handleMovement(event: FormEvent) {
     event.preventDefault()
+    setMovementError('')
     const amount = Number.parseFloat(depositAmount.replace(',', '.'))
     if (Number.isNaN(amount) || amount <= 0) return
-    await deposit.mutateAsync({ amount, currency: depositCurrencyValue })
-    setDepositAmount('')
+    try {
+      if (movementMode === 'deposit') {
+        await deposit.mutateAsync({ amount, currency: depositCurrencyValue })
+      } else {
+        await withdraw.mutateAsync({ amount, currency: depositCurrencyValue })
+      }
+      setDepositAmount('')
+    } catch (err) {
+      if (err instanceof ApiError) {
+        const body = err.body as { message?: string } | undefined
+        setMovementError(body?.message || 'Не удалось выполнить операцию')
+      } else {
+        setMovementError('Не удалось выполнить операцию')
+      }
+    }
   }
 
   async function handleSetPlan(event: FormEvent) {
@@ -105,18 +122,6 @@ export function SavingsPage() {
     if (Number.isNaN(amount) || amount < 0) return
     await setPlan.mutateAsync({ plannedAmount: amount, currency: planCurrencyValue })
     setPlanAmount('')
-  }
-
-  async function handleContributeToGoal(goalId: string) {
-    const amount = Number.parseFloat(contributeAmount.replace(',', '.'))
-    if (Number.isNaN(amount) || amount <= 0) return
-    await contribute.mutateAsync({
-      goalId,
-      amount,
-      currency: contributeCurrencyValue,
-    })
-    setContributeAmount('')
-    setContributeGoalId('')
   }
 
   if (isLoading) {
@@ -161,18 +166,35 @@ export function SavingsPage() {
               {formatMoney(data.balance, currency)}
             </p>
             <p className="mt-1 text-sm text-emerald-700">
-              В этом периоде: {formatMoney(data.current.actualAmount, currency)}
+              В этом периоде:{' '}
+              {formatMoney(
+                data.current.actualBaseAmount ?? data.current.actualAmount ?? 0,
+                currency,
+              )}
             </p>
+            <p className="mt-1 text-xs text-emerald-600/80">Итог по текущему курсу</p>
           </div>
 
           {canManagePlan && (
             <Card>
               <form
                 className="flex flex-col gap-3 sm:flex-row sm:items-end"
-                onSubmit={(e) => void handleDeposit(e)}
+                onSubmit={(e) => void handleMovement(e)}
               >
+                <Select
+                  label="Действие"
+                  value={movementMode}
+                  onChange={(e) => {
+                    setMovementMode(e.target.value as 'deposit' | 'withdraw')
+                    setMovementError('')
+                  }}
+                  options={[
+                    { value: 'deposit', label: 'Пополнить копилку' },
+                    { value: 'withdraw', label: 'Взять из копилки' },
+                  ]}
+                />
                 <Input
-                  label="Пополнить копилку"
+                  label="Сумма"
                   value={depositAmount}
                   onChange={(e) => setDepositAmount(e.target.value)}
                   placeholder="1000"
@@ -183,12 +205,21 @@ export function SavingsPage() {
                   onChange={(e) => setDepositCurrency(e.target.value)}
                   options={currencyOptions}
                 />
-                <Button type="submit" loading={deposit.isPending} className="shrink-0">
-                  Внести
+                <Button
+                  type="submit"
+                  loading={deposit.isPending || withdraw.isPending}
+                  className="shrink-0"
+                >
+                  {movementMode === 'deposit' ? 'Внести' : 'Снять'}
                 </Button>
               </form>
+              {movementError && (
+                <p className="mt-2 text-sm text-red-600">{movementError}</p>
+              )}
               <p className="mt-2 text-sm text-slate-500">
-                Сумма сохранится в {currency} по курсу на начало периода.
+                {movementMode === 'deposit'
+                  ? `В списке отобразится в выбранной валюте, итог — в ${currency} по текущему курсу.`
+                  : `Снятие нельзя больше баланса (${formatMoney(data.balance, currency)}).`}
               </p>
             </Card>
           )}
@@ -234,7 +265,7 @@ export function SavingsPage() {
                 title="Целей пока нет"
                 description={
                   canManagePlan
-                    ? 'Задайте цель — при достижении суммы семья получит уведомление.'
+                    ? 'Прогресс считается из баланса копилки. При достижении цели семья получит уведомление.'
                     : undefined
                 }
               />
@@ -260,6 +291,9 @@ export function SavingsPage() {
                               {formatMoney(goal.targetAmount, goalCur)}
                               <span className="ml-2 tabular-nums text-slate-400">{pct}%</span>
                             </p>
+                            <p className="mt-0.5 text-xs text-slate-400">
+                              Из баланса копилки по текущему курсу
+                            </p>
                           </div>
                           {canManagePlan && (
                             <Button
@@ -270,7 +304,7 @@ export function SavingsPage() {
                               onClick={async () => {
                                 const accepted = await confirm({
                                   title: `Удалить цель «${goal.name}»?`,
-                                  message: 'Прогресс по цели тоже будет удалён.',
+                                  message: 'Сама копилка не изменится.',
                                 })
                                 if (accepted) {
                                   void deleteGoal.mutateAsync(goal.id)
@@ -290,48 +324,6 @@ export function SavingsPage() {
                             style={{ width: `${pct}%` }}
                           />
                         </div>
-
-                        {canManagePlan && !goal.isCompleted && (
-                          <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-                            <Input
-                              label="Взнос в цель"
-                              value={contributeGoalId === goal.id ? contributeAmount : ''}
-                              onFocus={() => {
-                                setContributeGoalId(goal.id)
-                                setContributeCurrency(goalCur)
-                              }}
-                              onChange={(e) => {
-                                setContributeGoalId(goal.id)
-                                setContributeAmount(e.target.value)
-                              }}
-                              placeholder="1000"
-                            />
-                            <Select
-                              label="Валюта"
-                              value={
-                                contributeGoalId === goal.id
-                                  ? contributeCurrencyValue
-                                  : goalCur
-                              }
-                              onFocus={() => {
-                                setContributeGoalId(goal.id)
-                                setContributeCurrency(goalCur)
-                              }}
-                              onChange={(e) => {
-                                setContributeGoalId(goal.id)
-                                setContributeCurrency(e.target.value)
-                              }}
-                              options={currencyOptions}
-                            />
-                            <Button
-                              size="sm"
-                              loading={contribute.isPending && contributeGoalId === goal.id}
-                              onClick={() => void handleContributeToGoal(goal.id)}
-                            >
-                              Внести
-                            </Button>
-                          </div>
-                        )}
                       </li>
                     )
                   })}
@@ -340,27 +332,37 @@ export function SavingsPage() {
             )}
           </section>
 
-          {plans.some((p) => p.actualAmount > 0) && (
+          {periodsWithDeposits.length > 0 && (
             <section className="space-y-3">
               <h2 className="text-lg font-semibold text-slate-900">Факт по периодам</h2>
               <Card padding="none">
                 <ul className="divide-y divide-slate-100">
-                  {[...plans]
-                    .filter((p) => p.actualAmount > 0)
-                    .reverse()
-                    .map((entry) => (
-                      <li
-                        key={entry.id}
-                        className="flex items-center justify-between gap-4 px-5 py-3"
-                      >
+                  {periodsWithDeposits.map((entry) => {
+                    const lines =
+                      entry.actualByCurrency && entry.actualByCurrency.length > 0
+                        ? entry.actualByCurrency
+                        : [
+                            {
+                              amount: entry.actualBaseAmount ?? entry.actualAmount,
+                              currency: entry.currency || currency,
+                            },
+                          ]
+                    return (
+                      <li key={entry.id} className="space-y-1 px-5 py-3">
                         <p className="text-sm font-medium text-slate-700">
                           {formatPeriodLabel(entry)}
                         </p>
-                        <p className="tabular-nums font-semibold text-slate-900">
-                          {formatMoney(entry.actualAmount, entry.currency || currency)}
-                        </p>
+                        {lines.map((line) => (
+                          <p
+                            key={`${entry.id}-${line.currency}`}
+                            className="tabular-nums font-semibold text-slate-900"
+                          >
+                            {formatMoney(line.amount, line.currency)}
+                          </p>
+                        ))}
                       </li>
-                    ))}
+                    )
+                  })}
                 </ul>
                 <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50 px-5 py-3">
                   <p className="text-sm font-medium text-slate-600">Итого</p>
@@ -399,7 +401,16 @@ export function SavingsPage() {
                 </Button>
               </form>
               <p className="mt-2 text-sm text-slate-500">
-                Сейчас в плане: {formatMoney(data.current.plannedAmount, currency)} (в {currency})
+                Сейчас в плане:{' '}
+                {formatMoney(
+                  data.current.plannedAmount,
+                  data.current.plannedCurrency || currency,
+                )}
+                {data.current.plannedBaseAmount != null &&
+                  data.current.plannedCurrency &&
+                  data.current.plannedCurrency !== currency && (
+                    <> ≈ {formatMoney(data.current.plannedBaseAmount, currency)}</>
+                  )}
               </p>
             </Card>
           )}
@@ -421,22 +432,43 @@ export function SavingsPage() {
                 <span className="text-right sm:text-left">Месяц</span>
               </div>
               <ul className="divide-y divide-slate-100">
-                {plans.map((entry) => (
-                  <li
-                    key={entry.id}
-                    className="grid grid-cols-[1fr_1fr_1.2fr] items-center gap-2 px-4 py-3 sm:px-5"
-                  >
-                    <p className="tabular-nums text-sm font-medium text-slate-900">
-                      {formatMoney(entry.actualAmount, entry.currency || currency)}
-                    </p>
-                    <p className="tabular-nums text-sm font-medium text-slate-900">
-                      {formatMoney(entry.plannedAmount, entry.currency || currency)}
-                    </p>
-                    <p className="text-right text-sm text-slate-600 sm:text-left">
-                      {formatPeriodLabel(entry)}
-                    </p>
-                  </li>
-                ))}
+                {plans.map((entry) => {
+                  const actualLines =
+                    entry.actualByCurrency && entry.actualByCurrency.length > 0
+                      ? entry.actualByCurrency
+                      : entry.actualBaseAmount || entry.actualAmount
+                        ? [
+                            {
+                              amount: entry.actualBaseAmount ?? entry.actualAmount,
+                              currency: currency,
+                            },
+                          ]
+                        : [{ amount: 0, currency }]
+                  const plannedCurrency = entry.plannedCurrency || entry.currency || currency
+                  return (
+                    <li
+                      key={entry.id}
+                      className="grid grid-cols-[1fr_1fr_1.2fr] items-start gap-2 px-4 py-3 sm:px-5"
+                    >
+                      <div className="space-y-0.5">
+                        {actualLines.map((line) => (
+                          <p
+                            key={`${entry.id}-a-${line.currency}`}
+                            className="tabular-nums text-sm font-medium text-slate-900"
+                          >
+                            {formatMoney(line.amount, line.currency)}
+                          </p>
+                        ))}
+                      </div>
+                      <p className="tabular-nums text-sm font-medium text-slate-900">
+                        {formatMoney(entry.plannedAmount, plannedCurrency)}
+                      </p>
+                      <p className="text-right text-sm text-slate-600 sm:text-left">
+                        {formatPeriodLabel(entry)}
+                      </p>
+                    </li>
+                  )
+                })}
               </ul>
               <div className="grid grid-cols-[1fr_1fr_1.2fr] items-center gap-2 border-t border-slate-200 bg-emerald-50/60 px-4 py-3 sm:px-5">
                 <p className="tabular-nums text-sm font-bold text-slate-900">

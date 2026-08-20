@@ -539,6 +539,17 @@ export function useDepositSavings() {
   })
 }
 
+export function useWithdrawSavings() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ amount, currency }: { amount: number; currency: string }) =>
+      apiFetch<void>('/api/savings/withdraw', { method: 'POST', body: { amount, currency } }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.savings })
+    },
+  })
+}
+
 export function useSetSavingsPlan() {
   const queryClient = useQueryClient()
   return useMutation({

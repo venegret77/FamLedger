@@ -22,7 +22,8 @@ public class SavingsService(
         {
             ContextId = contextId,
             PeriodId = periodId,
-            Currency = context.BaseCurrency
+            Currency = context.BaseCurrency,
+            PlannedCurrency = context.BaseCurrency
         };
         db.SavingsEntries.Add(entry);
         await db.SaveChangesAsync(ct);
@@ -37,13 +38,59 @@ public class SavingsService(
         Guid userId,
         CancellationToken ct = default)
     {
+        if (amount <= 0) throw new ArgumentOutOfRangeException(nameof(amount));
+        await AddMovementAsync(contextId, periodId, amount, currency, userId, ct);
+    }
+
+    public async Task WithdrawAsync(
+        Guid contextId,
+        Guid periodId,
+        decimal amount,
+        string currency,
+        Guid userId,
+        CancellationToken ct = default)
+    {
+        if (amount <= 0) throw new ArgumentOutOfRangeException(nameof(amount));
+
+        var withdrawBase = await ToBaseAtCurrentRateAsync(contextId, periodId, amount, currency, ct);
+        var balance = await GetTotalBalanceAsync(contextId, ct);
+        if (withdrawBase > balance)
+            throw new InvalidOperationException("Недостаточно средств в копилке.");
+
+        await AddMovementAsync(contextId, periodId, -amount, currency, userId, ct);
+    }
+
+    private async Task AddMovementAsync(
+        Guid contextId,
+        Guid periodId,
+        decimal signedAmount,
+        string currency,
+        Guid userId,
+        CancellationToken ct)
+    {
         var member = await contextService.GetMembershipAsync(contextId, userId, ct);
         if (member is null || !RolePermissions.CanManagePlan(member.Role))
             throw new UnauthorizedAccessException();
 
-        var baseAmount = await ToBaseAmountAsync(contextId, periodId, amount, currency, ct);
-        var entry = await GetOrCreateForPeriodAsync(contextId, periodId, ct);
-        entry.ActualAmount += baseAmount;
+        var context = await db.BudgetContexts.FindAsync([contextId], ct)
+            ?? throw new InvalidOperationException("Context not found.");
+        var code = string.IsNullOrWhiteSpace(currency)
+            ? context.BaseCurrency
+            : currency.ToUpperInvariant();
+
+        await GetOrCreateForPeriodAsync(contextId, periodId, ct);
+
+        db.SavingsDeposits.Add(new SavingsDeposit
+        {
+            ContextId = contextId,
+            PeriodId = periodId,
+            UserId = userId,
+            Amount = signedAmount,
+            Currency = code
+        });
+
+        var entry = await db.SavingsEntries.FirstAsync(s => s.ContextId == contextId && s.PeriodId == periodId, ct);
+        entry.ActualAmount = await SumDepositsInBaseAsync(contextId, periodId, ct);
         await db.SaveChangesAsync(ct);
     }
 
@@ -59,24 +106,95 @@ public class SavingsService(
         if (member is null || !RolePermissions.CanManagePlan(member.Role))
             throw new UnauthorizedAccessException();
 
-        var baseAmount = await ToBaseAmountAsync(contextId, periodId, plannedAmount, currency, ct);
+        var context = await db.BudgetContexts.FindAsync([contextId], ct)
+            ?? throw new InvalidOperationException("Context not found.");
+        var code = string.IsNullOrWhiteSpace(currency)
+            ? context.BaseCurrency
+            : currency.ToUpperInvariant();
+
         var entry = await GetOrCreateForPeriodAsync(contextId, periodId, ct);
-        entry.PlannedAmount = baseAmount;
+        entry.PlannedAmount = plannedAmount;
+        entry.PlannedCurrency = code;
         await db.SaveChangesAsync(ct);
     }
 
-    public Task<decimal> GetTotalBalanceAsync(Guid contextId, CancellationToken ct = default) =>
-        db.SavingsEntries.Where(s => s.ContextId == contextId).SumAsync(s => s.ActualAmount, ct);
+    public async Task<decimal> GetTotalBalanceAsync(Guid contextId, CancellationToken ct = default)
+    {
+        var deposits = await db.SavingsDeposits
+            .Where(d => d.ContextId == contextId)
+            .Select(d => new { d.Amount, d.Currency, d.PeriodId })
+            .ToListAsync(ct);
 
-    public Task<IReadOnlyList<SavingsEntry>> GetPlansAsync(Guid contextId, CancellationToken ct = default) =>
-        db.SavingsEntries
+        decimal total = 0;
+        foreach (var deposit in deposits)
+            total += await ToBaseAtCurrentRateAsync(contextId, deposit.PeriodId, deposit.Amount, deposit.Currency, ct);
+        return total;
+    }
+
+    public async Task<IReadOnlyList<SavingsPeriodView>> GetPlansAsync(Guid contextId, CancellationToken ct = default)
+    {
+        var entries = await db.SavingsEntries
             .Include(s => s.Period)
             .Where(s => s.ContextId == contextId)
             .OrderBy(s => s.Period!.StartDate)
-            .ToListAsync(ct)
-            .ContinueWith(t => (IReadOnlyList<SavingsEntry>)t.Result, ct);
+            .ToListAsync(ct);
 
-    private async Task<decimal> ToBaseAmountAsync(
+        var deposits = await db.SavingsDeposits
+            .Where(d => d.ContextId == contextId)
+            .OrderBy(d => d.CreatedAt)
+            .ToListAsync(ct);
+
+        var result = new List<SavingsPeriodView>();
+        foreach (var entry in entries)
+        {
+            var periodDeposits = deposits.Where(d => d.PeriodId == entry.PeriodId).ToList();
+            var byCurrency = periodDeposits
+                .GroupBy(d => d.Currency)
+                .Select(g => new SavingsAmountByCurrency(g.Sum(x => x.Amount), g.Key))
+                .Where(x => x.Amount != 0)
+                .OrderBy(x => x.Currency)
+                .ToList();
+
+            var actualBase = 0m;
+            foreach (var deposit in periodDeposits)
+            {
+                actualBase += await ToBaseAtCurrentRateAsync(
+                    contextId, entry.PeriodId, deposit.Amount, deposit.Currency, ct);
+            }
+
+            var plannedBase = await ToBaseAtCurrentRateAsync(
+                contextId, entry.PeriodId, entry.PlannedAmount, entry.PlannedCurrency, ct);
+
+            result.Add(new SavingsPeriodView(
+                entry.Id,
+                entry.PlannedAmount,
+                entry.PlannedCurrency,
+                plannedBase,
+                actualBase,
+                entry.Currency,
+                entry.Period?.Label,
+                entry.Period?.StartDate,
+                entry.Period?.EndDate,
+                byCurrency));
+        }
+
+        return result;
+    }
+
+    private async Task<decimal> SumDepositsInBaseAsync(Guid contextId, Guid periodId, CancellationToken ct)
+    {
+        var deposits = await db.SavingsDeposits
+            .Where(d => d.ContextId == contextId && d.PeriodId == periodId)
+            .Select(d => new { d.Amount, d.Currency })
+            .ToListAsync(ct);
+
+        decimal total = 0;
+        foreach (var deposit in deposits)
+            total += await ToBaseAtCurrentRateAsync(contextId, periodId, deposit.Amount, deposit.Currency, ct);
+        return total;
+    }
+
+    private async Task<decimal> ToBaseAtCurrentRateAsync(
         Guid contextId,
         Guid periodId,
         decimal amount,
@@ -85,8 +203,6 @@ public class SavingsService(
     {
         var context = await db.BudgetContexts.FindAsync([contextId], ct)
             ?? throw new InvalidOperationException("Context not found.");
-        var period = await db.BudgetPeriods.FindAsync([periodId], ct)
-            ?? throw new InvalidOperationException("Period not found.");
         var code = string.IsNullOrWhiteSpace(currency)
             ? context.BaseCurrency
             : currency.ToUpperInvariant();
@@ -94,7 +210,8 @@ public class SavingsService(
         if (code.Equals(context.BaseCurrency, StringComparison.OrdinalIgnoreCase))
             return amount;
 
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
         return await exchangeRateService.ConvertToBaseAsync(
-            amount, code, period.StartDate, contextId, periodId, ct);
+            amount, code, today, contextId, periodId, ct);
     }
 }

@@ -1,4 +1,5 @@
 using FamLedger.Common;
+using FamLedger.Domain.Enums;
 using FamLedger.Domain.Models;
 using FamLedger.Interfaces.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -44,6 +45,7 @@ public class TelegramBot(
         var userService = scope.ServiceProvider.GetRequiredService<IUserService>();
         var expenseService = scope.ServiceProvider.GetRequiredService<IExpenseService>();
         var categoryService = scope.ServiceProvider.GetRequiredService<ICategoryService>();
+        var contextService = scope.ServiceProvider.GetRequiredService<IContextService>();
         var dialogState = scope.ServiceProvider.GetRequiredService<IDialogStateService>();
         var loginTokenService = scope.ServiceProvider.GetRequiredService<ILoginTokenService>();
 
@@ -75,7 +77,8 @@ public class TelegramBot(
 
             if (MoneyInputParser.TryParse(msg.Text, out var parsed))
             {
-                if (user.ActiveContextId is null)
+                var spendContext = await ResolveSpendContextAsync(contextService, user.Id, user.ActiveContextId, ct);
+                if (spendContext is null)
                 {
                     await client.SendMessage(chatId, "Сначала войди на сайт и выбери бюджет.", cancellationToken: ct);
                     return;
@@ -86,18 +89,27 @@ public class TelegramBot(
                     Step = "pick_category",
                     PendingAmount = parsed.Amount,
                     PendingCurrency = parsed.Currency,
-                    PendingContextId = user.ActiveContextId
+                    PendingContextId = spendContext.Id
                 };
                 await dialogState.SetAsync(chatId, state, TimeSpan.FromHours(1), ct);
 
-                var categories = await categoryService.GetByContextAsync(user.ActiveContextId.Value, ct);
-                var buttons = categories.Take(8).Select(c =>
-                    InlineKeyboardButton.WithCallbackData(c.Name, $"cat:{c.Id}")).Chunk(2)
-                    .Select(row => row.ToArray()).ToArray();
+                await categoryService.SeedDefaultsAsync(spendContext.Id, ct);
+                var categories = (await categoryService.GetByContextAsync(spendContext.Id, ct))
+                    .Where(c => c.Kind == CategoryKind.Expense)
+                    .OrderBy(c => c.SortOrder)
+                    .Take(8)
+                    .ToList();
+
+                var rows = categories
+                    .Select(c => InlineKeyboardButton.WithCallbackData(c.Name, $"cat:{c.Id}"))
+                    .Chunk(2)
+                    .Select(row => row.ToArray())
+                    .ToList();
+                rows.Add([InlineKeyboardButton.WithCallbackData("Без категории", "cat:none")]);
 
                 await client.SendMessage(chatId,
-                    $"Записать {MoneyFormatter.Format(parsed.Amount, parsed.Currency)} — выбери категорию:",
-                    replyMarkup: new InlineKeyboardMarkup(buttons),
+                    $"Записать {MoneyFormatter.Format(parsed.Amount, parsed.Currency)} в «{spendContext.Name}» — выбери категорию:",
+                    replyMarkup: new InlineKeyboardMarkup(rows),
                     cancellationToken: ct);
                 return;
             }
@@ -110,7 +122,8 @@ public class TelegramBot(
             var chatId = cb.Message!.Chat.Id;
             if (cb.Data.StartsWith("cat:"))
             {
-                var categoryId = Guid.Parse(cb.Data["cat:".Length..]);
+                var payload = cb.Data["cat:".Length..];
+                Guid? categoryId = payload == "none" ? null : Guid.Parse(payload);
                 var state = await dialogState.GetAsync(chatId, ct);
                 if (state?.PendingAmount is null || state.PendingContextId is null)
                 {
@@ -118,14 +131,47 @@ public class TelegramBot(
                     return;
                 }
 
-                var user = await userService.GetOrCreateByTelegramAsync(chatId, cb.From.Username, cb.From.FirstName, ct);
-                await expenseService.AddAsync(state.PendingContextId.Value, user.Id,
-                    state.PendingAmount.Value, state.PendingCurrency ?? "RSD", categoryId, null, null, ct);
+                var telegramUserId = cb.From.Id;
+                var user = await userService.GetOrCreateByTelegramAsync(
+                    telegramUserId, cb.From.Username, cb.From.FirstName, ct);
+                await expenseService.AddAsync(
+                    state.PendingContextId.Value,
+                    user.Id,
+                    state.PendingAmount.Value,
+                    state.PendingCurrency ?? "RSD",
+                    categoryId,
+                    null,
+                    null,
+                    ct);
                 await dialogState.ClearAsync(chatId, ct);
                 await client.AnswerCallbackQuery(cb.Id, "Записано!", cancellationToken: ct);
-                await client.SendMessage(chatId, $"✅ Расход {MoneyFormatter.Format(state.PendingAmount.Value, state.PendingCurrency ?? "RSD")} записан", cancellationToken: ct);
+                await client.SendMessage(chatId,
+                    $"✅ Расход {MoneyFormatter.Format(state.PendingAmount.Value, state.PendingCurrency ?? "RSD")} записан",
+                    cancellationToken: ct);
             }
         }
+    }
+
+    private static async Task<Domain.Entities.BudgetContext?> ResolveSpendContextAsync(
+        IContextService contextService,
+        Guid userId,
+        Guid? activeContextId,
+        CancellationToken ct)
+    {
+        var contexts = await contextService.GetUserContextsAsync(userId, ct);
+        if (contexts.Count == 0) return null;
+
+        // Семейный бюджет приоритетнее личного — туда пишут расходы из бота.
+        var family = contexts.FirstOrDefault(c => !c.IsPersonal);
+        if (family is not null) return family;
+
+        if (activeContextId is Guid activeId)
+        {
+            var active = contexts.FirstOrDefault(c => c.Id == activeId);
+            if (active is not null) return active;
+        }
+
+        return contexts[0];
     }
 
     private static Task HandleErrorAsync(ITelegramBotClient client, Exception ex, CancellationToken ct)

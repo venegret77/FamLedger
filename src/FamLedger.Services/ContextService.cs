@@ -23,6 +23,7 @@ public class ContextService(AppDbContext db) : IContextService
         };
         db.BudgetContexts.Add(context);
         db.ContextMembers.Add(new ContextMember { ContextId = context.Id, UserId = user.Id, Role = FamilyMemberRole.Head });
+        SeedDefaultCategories(context.Id);
         await db.SaveChangesAsync(ct);
         return context;
     }
@@ -37,6 +38,7 @@ public class ContextService(AppDbContext db) : IContextService
         };
         db.BudgetContexts.Add(context);
         db.ContextMembers.Add(new ContextMember { ContextId = context.Id, UserId = user.Id, Role = FamilyMemberRole.Head });
+        SeedDefaultCategories(context.Id);
         await db.SaveChangesAsync(ct);
         return context;
     }
@@ -88,6 +90,11 @@ public class ContextService(AppDbContext db) : IContextService
             UserId = request.UserId,
             Role = role
         });
+
+        var joiningUser = await db.Users.FindAsync([request.UserId], ct);
+        if (joiningUser is not null)
+            joiningUser.ActiveContextId = request.ContextId;
+
         await db.SaveChangesAsync(ct);
     }
 
@@ -197,4 +204,19 @@ public class ContextService(AppDbContext db) : IContextService
             .Select(m => m.Context)
             .ToListAsync(ct)
             .ContinueWith(t => (IReadOnlyList<BudgetContext>)t.Result, ct);
+
+    private void SeedDefaultCategories(Guid contextId)
+    {
+        foreach (var (name, kind, order) in DefaultCategories.Items)
+        {
+            db.Categories.Add(new Category
+            {
+                ContextId = contextId,
+                Name = name,
+                Kind = kind,
+                SortOrder = order,
+                IsDefault = true
+            });
+        }
+    }
 }

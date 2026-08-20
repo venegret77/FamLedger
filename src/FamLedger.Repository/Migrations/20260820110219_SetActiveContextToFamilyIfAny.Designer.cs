@@ -3,6 +3,7 @@ using System;
 using FamLedger.Repository;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace FamLedger.Repository.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260820110219_SetActiveContextToFamilyIfAny")]
+    partial class SetActiveContextToFamilyIfAny
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -544,43 +547,6 @@ namespace FamLedger.Repository.Migrations
                     b.ToTable("recurring_expenses", (string)null);
                 });
 
-            modelBuilder.Entity("FamLedger.Domain.Entities.SavingsDeposit", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<decimal>("Amount")
-                        .HasColumnType("numeric");
-
-                    b.Property<Guid>("ContextId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Currency")
-                        .IsRequired()
-                        .HasMaxLength(3)
-                        .HasColumnType("character varying(3)");
-
-                    b.Property<Guid>("PeriodId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("PeriodId");
-
-                    b.HasIndex("UserId");
-
-                    b.HasIndex("ContextId", "PeriodId");
-
-                    b.ToTable("savings_deposits", (string)null);
-                });
-
             modelBuilder.Entity("FamLedger.Domain.Entities.SavingsEntry", b =>
                 {
                     b.Property<Guid>("Id")
@@ -595,19 +561,13 @@ namespace FamLedger.Repository.Migrations
 
                     b.Property<string>("Currency")
                         .IsRequired()
-                        .HasMaxLength(3)
-                        .HasColumnType("character varying(3)");
+                        .HasColumnType("text");
 
                     b.Property<Guid>("PeriodId")
                         .HasColumnType("uuid");
 
                     b.Property<decimal>("PlannedAmount")
                         .HasColumnType("numeric");
-
-                    b.Property<string>("PlannedCurrency")
-                        .IsRequired()
-                        .HasMaxLength(3)
-                        .HasColumnType("character varying(3)");
 
                     b.HasKey("Id");
 
@@ -953,33 +913,6 @@ namespace FamLedger.Repository.Migrations
                     b.Navigation("Context");
                 });
 
-            modelBuilder.Entity("FamLedger.Domain.Entities.SavingsDeposit", b =>
-                {
-                    b.HasOne("FamLedger.Domain.Entities.BudgetContext", "Context")
-                        .WithMany("SavingsDeposits")
-                        .HasForeignKey("ContextId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("FamLedger.Domain.Entities.BudgetPeriod", "Period")
-                        .WithMany()
-                        .HasForeignKey("PeriodId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("FamLedger.Domain.Entities.User", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Context");
-
-                    b.Navigation("Period");
-
-                    b.Navigation("User");
-                });
-
             modelBuilder.Entity("FamLedger.Domain.Entities.SavingsEntry", b =>
                 {
                     b.HasOne("FamLedger.Domain.Entities.BudgetContext", "Context")
@@ -1071,8 +1004,6 @@ namespace FamLedger.Repository.Migrations
                     b.Navigation("Periods");
 
                     b.Navigation("RecurringExpenses");
-
-                    b.Navigation("SavingsDeposits");
 
                     b.Navigation("SavingsEntries");
 

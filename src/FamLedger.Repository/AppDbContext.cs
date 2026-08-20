@@ -19,6 +19,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Debt> Debts => Set<Debt>();
     public DbSet<DebtEntry> DebtEntries => Set<DebtEntry>();
     public DbSet<SavingsEntry> SavingsEntries => Set<SavingsEntry>();
+    public DbSet<SavingsDeposit> SavingsDeposits => Set<SavingsDeposit>();
     public DbSet<Goal> Goals => Set<Goal>();
     public DbSet<GoalContribution> GoalContributions => Set<GoalContribution>();
     public DbSet<ExchangeRate> ExchangeRates => Set<ExchangeRate>();
@@ -151,8 +152,21 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.ToTable("savings_entries");
             e.HasKey(x => x.Id);
             e.HasIndex(x => new { x.ContextId, x.PeriodId }).IsUnique();
+            e.Property(x => x.PlannedCurrency).HasMaxLength(3);
+            e.Property(x => x.Currency).HasMaxLength(3);
             e.HasOne(x => x.Context).WithMany(x => x.SavingsEntries).HasForeignKey(x => x.ContextId);
             e.HasOne(x => x.Period).WithMany().HasForeignKey(x => x.PeriodId);
+        });
+
+        modelBuilder.Entity<SavingsDeposit>(e =>
+        {
+            e.ToTable("savings_deposits");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.ContextId, x.PeriodId });
+            e.Property(x => x.Currency).HasMaxLength(3);
+            e.HasOne(x => x.Context).WithMany(x => x.SavingsDeposits).HasForeignKey(x => x.ContextId);
+            e.HasOne(x => x.Period).WithMany().HasForeignKey(x => x.PeriodId);
+            e.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId);
         });
 
         modelBuilder.Entity<Goal>(e =>
