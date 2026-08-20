@@ -359,8 +359,8 @@ public class BudgetController(
         });
     }
 
-    public record SavingsDepositRequest(decimal Amount);
-    public record SavingsPlanRequest(decimal PlannedAmount);
+    public record SavingsDepositRequest(decimal Amount, string? Currency);
+    public record SavingsPlanRequest(decimal PlannedAmount, string? Currency);
     public record GoalRequest(string Name, decimal TargetAmount);
     public record GoalContributeRequest(decimal Amount);
 
@@ -368,7 +368,13 @@ public class BudgetController(
     public async Task<IActionResult> Deposit([FromBody] SavingsDepositRequest request, CancellationToken ct)
     {
         var (context, period) = await GetActiveContextAsync(ct);
-        await savingsService.AddDepositAsync(context.Id, period.Id, request.Amount, User.GetUserId(), ct);
+        await savingsService.AddDepositAsync(
+            context.Id,
+            period.Id,
+            request.Amount,
+            request.Currency ?? context.BaseCurrency,
+            User.GetUserId(),
+            ct);
         return Ok();
     }
 
@@ -376,7 +382,13 @@ public class BudgetController(
     public async Task<IActionResult> SetPlan([FromBody] SavingsPlanRequest request, CancellationToken ct)
     {
         var (context, period) = await GetActiveContextAsync(ct);
-        await savingsService.SetPlanAsync(context.Id, period.Id, request.PlannedAmount, User.GetUserId(), ct);
+        await savingsService.SetPlanAsync(
+            context.Id,
+            period.Id,
+            request.PlannedAmount,
+            request.Currency ?? context.BaseCurrency,
+            User.GetUserId(),
+            ct);
         return Ok();
     }
 

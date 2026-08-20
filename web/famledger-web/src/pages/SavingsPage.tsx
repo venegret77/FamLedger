@@ -10,11 +10,12 @@ import {
   useSettings,
 } from '../api/hooks'
 import type { SavingsEntry } from '../api/types'
+import { currencyOptions } from '../api/types'
 import { Card } from '../components/ui/Card'
 import { EmptyState, PageHeader, Spinner, Tabs, Badge } from '../components/ui/Tabs'
 import { Button } from '../components/ui/Button'
 import { useConfirmDialog } from '../components/ui/ConfirmDialog'
-import { Input } from '../components/ui/Input'
+import { Input, Select } from '../components/ui/Input'
 import { formatMoney } from '../lib/format'
 
 const savingsTabs = [
@@ -48,13 +49,17 @@ export function SavingsPage() {
   const [goalName, setGoalName] = useState('')
   const [goalTarget, setGoalTarget] = useState('')
   const [depositAmount, setDepositAmount] = useState('')
+  const [depositCurrency, setDepositCurrency] = useState('')
   const [planAmount, setPlanAmount] = useState('')
+  const [planCurrency, setPlanCurrency] = useState('')
   const [contributeGoalId, setContributeGoalId] = useState('')
   const [contributeAmount, setContributeAmount] = useState('')
 
   const plans = Array.isArray(data?.plans) ? data.plans : []
   const goals = Array.isArray(data?.goals) ? data.goals : []
   const currency = settings?.baseCurrency ?? plans[0]?.currency ?? 'RSD'
+  const depositCurrencyValue = depositCurrency || currency
+  const planCurrencyValue = planCurrency || currency
 
   const totals = useMemo(
     () =>
@@ -82,7 +87,7 @@ export function SavingsPage() {
     event.preventDefault()
     const amount = Number.parseFloat(depositAmount.replace(',', '.'))
     if (Number.isNaN(amount) || amount <= 0) return
-    await deposit.mutateAsync(amount)
+    await deposit.mutateAsync({ amount, currency: depositCurrencyValue })
     setDepositAmount('')
   }
 
@@ -90,7 +95,7 @@ export function SavingsPage() {
     event.preventDefault()
     const amount = Number.parseFloat(planAmount.replace(',', '.'))
     if (Number.isNaN(amount) || amount < 0) return
-    await setPlan.mutateAsync(amount)
+    await setPlan.mutateAsync({ plannedAmount: amount, currency: planCurrencyValue })
     setPlanAmount('')
   }
 
@@ -160,10 +165,19 @@ export function SavingsPage() {
                   onChange={(e) => setDepositAmount(e.target.value)}
                   placeholder="1000"
                 />
+                <Select
+                  label="Валюта"
+                  value={depositCurrencyValue}
+                  onChange={(e) => setDepositCurrency(e.target.value)}
+                  options={currencyOptions}
+                />
                 <Button type="submit" loading={deposit.isPending} className="shrink-0">
                   Внести
                 </Button>
               </form>
+              <p className="mt-2 text-sm text-slate-500">
+                Сумма сохранится в {currency} по курсу на начало периода.
+              </p>
             </Card>
           )}
 
@@ -330,17 +344,23 @@ export function SavingsPage() {
                 onSubmit={(e) => void handleSetPlan(e)}
               >
                 <Input
-                  label={`План на текущий период, ${currency}`}
+                  label="План на текущий период"
                   value={planAmount}
                   onChange={(e) => setPlanAmount(e.target.value)}
                   placeholder={String(data.current.plannedAmount || '')}
+                />
+                <Select
+                  label="Валюта"
+                  value={planCurrencyValue}
+                  onChange={(e) => setPlanCurrency(e.target.value)}
+                  options={currencyOptions}
                 />
                 <Button type="submit" loading={setPlan.isPending} className="shrink-0">
                   Сохранить план
                 </Button>
               </form>
               <p className="mt-2 text-sm text-slate-500">
-                Сейчас в плане: {formatMoney(data.current.plannedAmount, currency)}
+                Сейчас в плане: {formatMoney(data.current.plannedAmount, currency)} (в {currency})
               </p>
             </Card>
           )}

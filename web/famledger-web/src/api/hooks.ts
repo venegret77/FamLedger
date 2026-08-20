@@ -531,8 +531,8 @@ export function useDeleteDebtEntry() {
 export function useDepositSavings() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (amount: number) =>
-      apiFetch<void>('/api/savings/deposit', { method: 'POST', body: { amount } }),
+    mutationFn: ({ amount, currency }: { amount: number; currency: string }) =>
+      apiFetch<void>('/api/savings/deposit', { method: 'POST', body: { amount, currency } }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.savings })
     },
@@ -542,8 +542,11 @@ export function useDepositSavings() {
 export function useSetSavingsPlan() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (plannedAmount: number) =>
-      apiFetch<void>('/api/savings/plan', { method: 'POST', body: { plannedAmount } }),
+    mutationFn: ({ plannedAmount, currency }: { plannedAmount: number; currency: string }) =>
+      apiFetch<void>('/api/savings/plan', {
+        method: 'POST',
+        body: { plannedAmount, currency },
+      }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.savings })
     },

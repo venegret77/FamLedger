@@ -78,8 +78,8 @@ public interface IDebtService
 public interface ISavingsService
 {
     Task<SavingsEntry> GetOrCreateForPeriodAsync(Guid contextId, Guid periodId, CancellationToken ct = default);
-    Task AddDepositAsync(Guid contextId, Guid periodId, decimal amount, Guid userId, CancellationToken ct = default);
-    Task SetPlanAsync(Guid contextId, Guid periodId, decimal plannedAmount, Guid userId, CancellationToken ct = default);
+    Task AddDepositAsync(Guid contextId, Guid periodId, decimal amount, string currency, Guid userId, CancellationToken ct = default);
+    Task SetPlanAsync(Guid contextId, Guid periodId, decimal plannedAmount, string currency, Guid userId, CancellationToken ct = default);
     Task<decimal> GetTotalBalanceAsync(Guid contextId, CancellationToken ct = default);
     Task<IReadOnlyList<SavingsEntry>> GetPlansAsync(Guid contextId, CancellationToken ct = default);
 }
