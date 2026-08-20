@@ -113,6 +113,7 @@ export interface SavingsGoal {
   id: string
   name: string
   targetAmount: number
+  currency: string
   isCompleted: boolean
   progress: number
 }

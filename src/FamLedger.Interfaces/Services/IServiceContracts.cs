@@ -86,8 +86,8 @@ public interface ISavingsService
 
 public interface IGoalService
 {
-    Task<Goal> CreateAsync(Guid contextId, Guid userId, string name, decimal targetAmount, CancellationToken ct = default);
-    Task ContributeAsync(Guid goalId, Guid userId, decimal amount, CancellationToken ct = default);
+    Task<Goal> CreateAsync(Guid contextId, Guid userId, string name, decimal targetAmount, string currency, CancellationToken ct = default);
+    Task ContributeAsync(Guid goalId, Guid userId, decimal amount, string currency, CancellationToken ct = default);
     Task<IReadOnlyList<Goal>> GetByContextAsync(Guid contextId, CancellationToken ct = default);
     Task DeleteAsync(Guid goalId, Guid userId, CancellationToken ct = default);
     Task CheckAndNotifyCompletedAsync(Guid goalId, CancellationToken ct = default);

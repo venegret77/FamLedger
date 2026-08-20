@@ -355,14 +355,22 @@ public class BudgetController(
                 PeriodStart = p.Period?.StartDate,
                 PeriodEnd = p.Period?.EndDate
             }),
-            goals = goals.Select(g => new { g.Id, g.Name, g.TargetAmount, g.IsCompleted, Progress = g.Contributions.Sum(c => c.Amount) })
+            goals = goals.Select(g => new
+            {
+                g.Id,
+                g.Name,
+                g.TargetAmount,
+                g.Currency,
+                g.IsCompleted,
+                Progress = g.Contributions.Sum(c => c.Amount)
+            })
         });
     }
 
     public record SavingsDepositRequest(decimal Amount, string? Currency);
     public record SavingsPlanRequest(decimal PlannedAmount, string? Currency);
-    public record GoalRequest(string Name, decimal TargetAmount);
-    public record GoalContributeRequest(decimal Amount);
+    public record GoalRequest(string Name, decimal TargetAmount, string? Currency);
+    public record GoalContributeRequest(decimal Amount, string? Currency);
 
     [HttpPost("savings/deposit")]
     public async Task<IActionResult> Deposit([FromBody] SavingsDepositRequest request, CancellationToken ct)
@@ -396,14 +404,26 @@ public class BudgetController(
     public async Task<IActionResult> CreateGoal([FromBody] GoalRequest request, CancellationToken ct)
     {
         var (context, _) = await GetActiveContextAsync(ct);
-        var goal = await goalService.CreateAsync(context.Id, User.GetUserId(), request.Name, request.TargetAmount, ct);
+        var goal = await goalService.CreateAsync(
+            context.Id,
+            User.GetUserId(),
+            request.Name,
+            request.TargetAmount,
+            request.Currency ?? context.BaseCurrency,
+            ct);
         return Ok(new { goal.Id });
     }
 
     [HttpPost("savings/goals/{goalId:guid}/contribute")]
     public async Task<IActionResult> ContributeGoal(Guid goalId, [FromBody] GoalContributeRequest request, CancellationToken ct)
     {
-        await goalService.ContributeAsync(goalId, User.GetUserId(), request.Amount, ct);
+        var (context, _) = await GetActiveContextAsync(ct);
+        await goalService.ContributeAsync(
+            goalId,
+            User.GetUserId(),
+            request.Amount,
+            request.Currency ?? context.BaseCurrency,
+            ct);
         return Ok();
     }
 

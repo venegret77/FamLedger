@@ -48,18 +48,22 @@ export function SavingsPage() {
 
   const [goalName, setGoalName] = useState('')
   const [goalTarget, setGoalTarget] = useState('')
+  const [goalCurrency, setGoalCurrency] = useState('')
   const [depositAmount, setDepositAmount] = useState('')
   const [depositCurrency, setDepositCurrency] = useState('')
   const [planAmount, setPlanAmount] = useState('')
   const [planCurrency, setPlanCurrency] = useState('')
   const [contributeGoalId, setContributeGoalId] = useState('')
   const [contributeAmount, setContributeAmount] = useState('')
+  const [contributeCurrency, setContributeCurrency] = useState('')
 
   const plans = Array.isArray(data?.plans) ? data.plans : []
   const goals = Array.isArray(data?.goals) ? data.goals : []
   const currency = settings?.baseCurrency ?? plans[0]?.currency ?? 'RSD'
   const depositCurrencyValue = depositCurrency || currency
   const planCurrencyValue = planCurrency || currency
+  const goalCurrencyValue = goalCurrency || currency
+  const contributeCurrencyValue = contributeCurrency || currency
 
   const totals = useMemo(
     () =>
@@ -78,7 +82,11 @@ export function SavingsPage() {
     const target = Number.parseFloat(goalTarget.replace(',', '.'))
     const name = goalName.trim()
     if (!name || Number.isNaN(target) || target <= 0) return
-    await createGoal.mutateAsync({ name, targetAmount: target })
+    await createGoal.mutateAsync({
+      name,
+      targetAmount: target,
+      currency: goalCurrencyValue,
+    })
     setGoalName('')
     setGoalTarget('')
   }
@@ -102,7 +110,11 @@ export function SavingsPage() {
   async function handleContributeToGoal(goalId: string) {
     const amount = Number.parseFloat(contributeAmount.replace(',', '.'))
     if (Number.isNaN(amount) || amount <= 0) return
-    await contribute.mutateAsync({ goalId, amount })
+    await contribute.mutateAsync({
+      goalId,
+      amount,
+      currency: contributeCurrencyValue,
+    })
     setContributeAmount('')
     setContributeGoalId('')
   }
@@ -199,10 +211,16 @@ export function SavingsPage() {
                     placeholder="Отпуск"
                   />
                   <Input
-                    label={`Цель, ${currency}`}
+                    label="Цель"
                     value={goalTarget}
                     onChange={(e) => setGoalTarget(e.target.value)}
-                    placeholder="50000"
+                    placeholder="500"
+                  />
+                  <Select
+                    label="Валюта"
+                    value={goalCurrencyValue}
+                    onChange={(e) => setGoalCurrency(e.target.value)}
+                    options={currencyOptions}
                   />
                   <Button type="submit" loading={createGoal.isPending} className="shrink-0">
                     Добавить цель
@@ -224,6 +242,7 @@ export function SavingsPage() {
               <Card padding="none">
                 <ul className="divide-y divide-slate-100">
                   {goals.map((goal) => {
+                    const goalCur = goal.currency || currency
                     const pct =
                       goal.targetAmount > 0
                         ? Math.min(100, Math.round((goal.progress / goal.targetAmount) * 100))
@@ -237,8 +256,8 @@ export function SavingsPage() {
                               {goal.isCompleted && <Badge variant="success">Достигнута</Badge>}
                             </div>
                             <p className="mt-1 text-sm text-slate-500">
-                              {formatMoney(goal.progress, currency)} /{' '}
-                              {formatMoney(goal.targetAmount, currency)}
+                              {formatMoney(goal.progress, goalCur)} /{' '}
+                              {formatMoney(goal.targetAmount, goalCur)}
                               <span className="ml-2 tabular-nums text-slate-400">{pct}%</span>
                             </p>
                           </div>
@@ -277,12 +296,32 @@ export function SavingsPage() {
                             <Input
                               label="Взнос в цель"
                               value={contributeGoalId === goal.id ? contributeAmount : ''}
-                              onFocus={() => setContributeGoalId(goal.id)}
+                              onFocus={() => {
+                                setContributeGoalId(goal.id)
+                                setContributeCurrency(goalCur)
+                              }}
                               onChange={(e) => {
                                 setContributeGoalId(goal.id)
                                 setContributeAmount(e.target.value)
                               }}
                               placeholder="1000"
+                            />
+                            <Select
+                              label="Валюта"
+                              value={
+                                contributeGoalId === goal.id
+                                  ? contributeCurrencyValue
+                                  : goalCur
+                              }
+                              onFocus={() => {
+                                setContributeGoalId(goal.id)
+                                setContributeCurrency(goalCur)
+                              }}
+                              onChange={(e) => {
+                                setContributeGoalId(goal.id)
+                                setContributeCurrency(e.target.value)
+                              }}
+                              options={currencyOptions}
                             />
                             <Button
                               size="sm"

@@ -415,7 +415,7 @@ export function useDeleteIncome() {
 export function useCreateGoal() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (payload: { name: string; targetAmount: number }) =>
+    mutationFn: (payload: { name: string; targetAmount: number; currency: string }) =>
       apiFetch<{ id: string }>('/api/savings/goals', { method: 'POST', body: payload }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.savings })
@@ -556,10 +556,18 @@ export function useSetSavingsPlan() {
 export function useContributeGoal() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ goalId, amount }: { goalId: string; amount: number }) =>
+    mutationFn: ({
+      goalId,
+      amount,
+      currency,
+    }: {
+      goalId: string
+      amount: number
+      currency: string
+    }) =>
       apiFetch<void>(`/api/savings/goals/${goalId}/contribute`, {
         method: 'POST',
-        body: { amount },
+        body: { amount, currency },
       }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.savings })
