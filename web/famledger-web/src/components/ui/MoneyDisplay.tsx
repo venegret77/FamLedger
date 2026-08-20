@@ -44,6 +44,7 @@ interface StatCardProps {
   amount: number
   currency?: string
   hint?: string
+  breakdown?: { label: string; amount: number }[]
   accent?: boolean
 }
 
@@ -52,6 +53,7 @@ export function StatCard({
   amount,
   currency = 'RSD',
   hint,
+  breakdown,
   accent = false,
 }: StatCardProps) {
   return (
@@ -76,7 +78,23 @@ export function StatCard({
       >
         {formatMoney(amount, currency)}
       </p>
-      {hint && (
+      {breakdown && breakdown.length > 0 && (
+        <dl
+          className={`mt-3 space-y-1 border-t pt-2 text-xs ${
+            accent ? 'border-white/20 text-brand-100' : 'border-slate-100 text-slate-500'
+          }`}
+        >
+          {breakdown.map((row) => (
+            <div key={row.label} className="flex items-baseline justify-between gap-3">
+              <dt>{row.label}</dt>
+              <dd className={`tabular-nums font-medium ${accent ? 'text-white/90' : 'text-slate-700'}`}>
+                {formatMoney(row.amount, currency)}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {hint && !breakdown && (
         <p className={`mt-1 text-xs ${accent ? 'text-brand-100' : 'text-slate-500'}`}>
           {hint}
         </p>

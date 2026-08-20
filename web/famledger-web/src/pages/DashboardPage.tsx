@@ -94,8 +94,12 @@ export function DashboardPage() {
           label="Остаток месяца"
           amount={summary.remaining}
           currency={currency}
-          hint={`Доходы ${formatMoney(summary.income, currency)} − план ${formatMoney(summary.plannedExpenses, currency)} − факт ${formatMoney(summary.spent, currency)}`}
           accent
+          breakdown={[
+            { label: 'Доходы', amount: summary.income },
+            { label: 'План', amount: summary.plannedExpenses },
+            { label: 'Факт', amount: summary.spent },
+          ]}
         />
         <StatCard
           label="Дневной бюджет"
