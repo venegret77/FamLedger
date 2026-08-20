@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { queryKeys } from '../api/hooks'
@@ -10,7 +10,23 @@ const API_URL =
     ? ''
     : (import.meta.env.VITE_API_URL?.trim() || 'http://localhost:8080')
 
-const BOT_USERNAME = import.meta.env.VITE_TELEGRAM_BOT_USERNAME?.trim() ?? ''
+const BOT_USERNAME = (import.meta.env.VITE_TELEGRAM_BOT_USERNAME?.trim() ?? '').replace(/^@/, '')
+
+type TelegramWidgetUser = {
+  id: number
+  first_name?: string
+  last_name?: string
+  username?: string
+  photo_url?: string
+  auth_date: number
+  hash: string
+}
+
+declare global {
+  interface Window {
+    onTelegramAuth?: (user: TelegramWidgetUser) => void
+  }
+}
 
 async function exchangeBotToken(
   token: string,
@@ -25,7 +41,7 @@ async function exchangeBotToken(
   if (!res.ok) {
     let message = `Ошибка ${res.status}`
     try {
-      const body = await res.json() as { message?: string }
+      const body = (await res.json()) as { message?: string }
       if (body.message) message = body.message
     } catch {
       const text = await res.text()
@@ -36,36 +52,88 @@ async function exchangeBotToken(
   await queryClient.invalidateQueries({ queryKey: queryKeys.me })
 }
 
+async function exchangeTelegramWidget(
+  user: TelegramWidgetUser,
+  queryClient: ReturnType<typeof useQueryClient>,
+): Promise<void> {
+  const res = await fetch(`${API_URL}/api/auth/telegram`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({
+      id: user.id,
+      firstName: user.first_name,
+      lastName: user.last_name,
+      username: user.username,
+      photoUrl: user.photo_url,
+      authDate: user.auth_date,
+      hash: user.hash,
+    }),
+  })
+  if (!res.ok) {
+    let message = `Ошибка ${res.status}`
+    try {
+      const body = (await res.json()) as { message?: string }
+      if (body.message) message = body.message
+    } catch {
+      /* ignore */
+    }
+    throw new Error(message)
+  }
+  await queryClient.invalidateQueries({ queryKey: queryKeys.me })
+}
+
 export function LoginPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const queryClient = useQueryClient()
+  const widgetHostRef = useRef<HTMLDivElement>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [botLoginHint, setBotLoginHint] = useState(false)
+  const [showCodeFallback, setShowCodeFallback] = useState(false)
   const [manualToken, setManualToken] = useState('')
 
   const from = (location.state as { from?: string } | null)?.from ?? '/'
   const botLoginUrl = BOT_USERNAME ? `https://t.me/${BOT_USERNAME}?start=login` : null
 
-  const completeLogin = async (token: string) => {
+  const finish = async (action: () => Promise<void>) => {
     setLoading(true)
     setError(null)
     try {
-      await exchangeBotToken(token, queryClient)
+      await action()
       navigate(from, { replace: true })
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Код для входа недействителен')
+      setError(e instanceof Error ? e.message : 'Не удалось войти')
     } finally {
       setLoading(false)
     }
   }
 
-  const handleBotLogin = () => {
-    if (!botLoginUrl) return
-    setBotLoginHint(true)
-    window.open(botLoginUrl, '_blank', 'noopener,noreferrer')
-  }
+  useEffect(() => {
+    if (!BOT_USERNAME || !widgetHostRef.current) return
+
+    window.onTelegramAuth = (user) => {
+      void finish(() => exchangeTelegramWidget(user, queryClient))
+    }
+
+    const host = widgetHostRef.current
+    host.innerHTML = ''
+    const script = document.createElement('script')
+    script.src = 'https://telegram.org/js/telegram-widget.js?22'
+    script.async = true
+    script.setAttribute('data-telegram-login', BOT_USERNAME)
+    script.setAttribute('data-size', 'large')
+    script.setAttribute('data-radius', '12')
+    script.setAttribute('data-onauth', 'onTelegramAuth(user)')
+    script.setAttribute('data-request-access', 'write')
+    host.appendChild(script)
+
+    return () => {
+      delete window.onTelegramAuth
+      host.innerHTML = ''
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount once per bot username
+  }, [BOT_USERNAME, queryClient])
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-brand-50 via-white to-slate-100 px-4 py-12">
@@ -80,55 +148,65 @@ export function LoginPage() {
 
         <Card className="shadow-md">
           <CardTitle>Вход</CardTitle>
-          <CardDescription>
-            Открой бота, получи код и вставь его ниже.
-          </CardDescription>
+          <CardDescription>Через Telegram — одним нажатием.</CardDescription>
 
           <div className="mt-6 space-y-4">
             {BOT_USERNAME ? (
               <>
-                <Button
-                  variant="primary"
-                  size="lg"
-                  className="w-full"
-                  disabled={loading}
-                  onClick={handleBotLogin}
-                >
-                  <TelegramIcon />
-                  Войти через Telegram-бота
-                </Button>
-
-                {botLoginHint && (
-                  <p className="rounded-xl border border-brand-200 bg-brand-50 px-4 py-3 text-sm text-brand-900">
-                    В боте: /start login → скопируй код → вставь ниже → «Войти».
-                  </p>
-                )}
-
-                <form
-                  className="flex gap-2"
-                  onSubmit={(e) => {
-                    e.preventDefault()
-                    const token = manualToken.trim()
-                    if (token) void completeLogin(token)
-                  }}
-                >
-                  <input
-                    type="text"
-                    value={manualToken}
-                    onChange={(e) => setManualToken(e.target.value)}
-                    placeholder="Код из бота"
-                    className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
-                    disabled={loading}
-                    autoComplete="off"
-                    spellCheck={false}
-                  />
-                  <Button type="submit" variant="secondary" disabled={loading || !manualToken.trim()}>
-                    Войти
-                  </Button>
-                </form>
+                <div className="flex min-h-[44px] justify-center" ref={widgetHostRef} />
 
                 {loading && (
                   <p className="text-center text-sm text-slate-500">Входим…</p>
+                )}
+
+                <button
+                  type="button"
+                  className="w-full text-center text-sm text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline"
+                  onClick={() => setShowCodeFallback((v) => !v)}
+                >
+                  {showCodeFallback ? 'Скрыть вход по коду' : 'Войти кодом из бота'}
+                </button>
+
+                {showCodeFallback && (
+                  <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    {botLoginUrl && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        className="w-full"
+                        onClick={() => window.open(botLoginUrl, '_blank', 'noopener,noreferrer')}
+                      >
+                        <TelegramIcon />
+                        Открыть бота (/start login)
+                      </Button>
+                    )}
+                    <form
+                      className="flex gap-2"
+                      onSubmit={(e) => {
+                        e.preventDefault()
+                        const token = manualToken.trim()
+                        if (token) void finish(() => exchangeBotToken(token, queryClient))
+                      }}
+                    >
+                      <input
+                        type="text"
+                        value={manualToken}
+                        onChange={(e) => setManualToken(e.target.value)}
+                        placeholder="Код из бота"
+                        className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
+                        disabled={loading}
+                        autoComplete="off"
+                        spellCheck={false}
+                      />
+                      <Button
+                        type="submit"
+                        variant="secondary"
+                        disabled={loading || !manualToken.trim()}
+                      >
+                        Войти
+                      </Button>
+                    </form>
+                  </div>
                 )}
               </>
             ) : (

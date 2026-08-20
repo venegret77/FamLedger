@@ -10,17 +10,39 @@ namespace FamLedger.Api.Controllers;
 [Route("api/auth")]
 public class AuthController(IAuthService authService, ILoginTokenService loginTokenService) : ControllerBase
 {
-    public record TelegramAuthRequest(long Id, string? FirstName, string? Username, string? PhotoUrl, long AuthDate, string Hash);
+    public record TelegramAuthRequest(
+        long Id,
+        string? FirstName,
+        string? LastName,
+        string? Username,
+        string? PhotoUrl,
+        long AuthDate,
+        string Hash);
+
     public record BotLoginRequest(string Token);
 
     [HttpPost("telegram")]
     public async Task<IActionResult> TelegramLogin([FromBody] TelegramAuthRequest request, CancellationToken ct)
     {
-        var token = await authService.AuthenticateTelegramAsync(
-            request.Id, request.FirstName, request.Username, request.PhotoUrl, request.AuthDate, request.Hash, ct);
+        try
+        {
+            var token = await authService.AuthenticateTelegramAsync(
+                request.Id,
+                request.FirstName,
+                request.LastName,
+                request.Username,
+                request.PhotoUrl,
+                request.AuthDate,
+                request.Hash,
+                ct);
 
-        AppendAuthCookie(token);
-        return Ok(new { success = true });
+            AppendAuthCookie(token);
+            return Ok(new { success = true });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Unauthorized(new { message = ex.Message });
+        }
     }
 
     [HttpPost("bot")]
@@ -67,10 +89,17 @@ public class AuthController(IAuthService authService, ILoginTokenService loginTo
         Response.Cookies.Append("auth_token", token, options);
     }
 
-    private static CookieOptions AuthCookieOptions() => new()
+    private CookieOptions AuthCookieOptions()
     {
-        HttpOnly = true,
-        Secure = false,
-        SameSite = SameSiteMode.Lax,
-    };
+        var forwardedProto = Request.Headers["X-Forwarded-Proto"].ToString();
+        var secure = Request.IsHttps ||
+                     string.Equals(forwardedProto, "https", StringComparison.OrdinalIgnoreCase);
+
+        return new CookieOptions
+        {
+            HttpOnly = true,
+            Secure = secure,
+            SameSite = SameSiteMode.Lax,
+        };
+    }
 }

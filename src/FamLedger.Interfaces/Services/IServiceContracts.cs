@@ -112,7 +112,15 @@ public interface IGoalService
 
 public interface IAuthService
 {
-    Task<string> AuthenticateTelegramAsync(long id, string? firstName, string? username, string? photoUrl, long authDate, string hash, CancellationToken ct = default);
+    Task<string> AuthenticateTelegramAsync(
+        long id,
+        string? firstName,
+        string? lastName,
+        string? username,
+        string? photoUrl,
+        long authDate,
+        string hash,
+        CancellationToken ct = default);
     Task<string> AuthenticateByTelegramUserAsync(long telegramUserId, string? username, string? firstName, CancellationToken ct = default);
     bool ValidateTelegramHash(Dictionary<string, string> fields, string hash);
 }
