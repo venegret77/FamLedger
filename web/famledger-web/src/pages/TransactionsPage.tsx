@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useDeleteTransaction, useTransactions } from '../api/hooks'
+import { useDeleteTransaction, useSettings, useTransactions } from '../api/hooks'
 import { useConfirmDialog } from '../components/ui/ConfirmDialog'
 import { Card } from '../components/ui/Card'
 import { EmptyState, PageHeader, Spinner, Tabs } from '../components/ui/Tabs'
@@ -15,9 +15,11 @@ const viewTabs = [
 
 export function TransactionsPage() {
   const { data: transactions, isLoading, isError, refetch } = useTransactions()
+  const { data: settings } = useSettings()
   const deleteTx = useDeleteTransaction()
   const { confirm } = useConfirmDialog()
   const [activeTab, setActiveTab] = useState('list')
+  const baseCurrency = settings?.baseCurrency ?? 'RSD'
 
   const byDay = useMemo(() => {
     if (!transactions?.length) return []
@@ -87,7 +89,7 @@ export function TransactionsPage() {
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <MoneyDisplay amount={-tx.baseAmount} currency={tx.currency} />
+                  <MoneyDisplay amount={-tx.amount} currency={tx.currency} />
                   <Button
                     variant="ghost"
                     size="sm"
@@ -115,13 +117,17 @@ export function TransactionsPage() {
           {byDay.map(([date, items]) => (
             <Card key={date} padding="none">
               <div className="border-b border-slate-100 px-5 py-3 font-medium text-slate-900">
-                {formatDate(date)} · {formatMoney(items.reduce((s, t) => s + t.baseAmount, 0), items[0]?.currency ?? 'RSD')}
+                {formatDate(date)} ·{' '}
+                {formatMoney(
+                  items.reduce((s, t) => s + t.baseAmount, 0),
+                  baseCurrency,
+                )}
               </div>
               <ul className="divide-y divide-slate-100">
                 {items.map((tx) => (
                   <li key={tx.id} className="flex justify-between gap-4 px-5 py-3 text-sm">
                     <span>{tx.note || tx.categoryName || 'Расход'}</span>
-                    <MoneyDisplay amount={-tx.baseAmount} currency={tx.currency} />
+                    <MoneyDisplay amount={-tx.amount} currency={tx.currency} />
                   </li>
                 ))}
               </ul>
@@ -134,7 +140,7 @@ export function TransactionsPage() {
             {byCategory.map(([name, total]) => (
               <li key={name} className="flex justify-between gap-4 px-5 py-4">
                 <span className="font-medium text-slate-900">{name}</span>
-                <span className="text-slate-900">{formatMoney(total, transactions[0]?.currency ?? 'RSD')}</span>
+                <span className="text-slate-900">{formatMoney(total, baseCurrency)}</span>
               </li>
             ))}
           </ul>

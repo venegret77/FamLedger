@@ -12,6 +12,7 @@ import { EmptyState, PageHeader, Spinner } from '../components/ui/Tabs'
 import { StatCard } from '../components/ui/MoneyDisplay'
 import { MobileMoreMenu } from '../components/layout/Navigation'
 import { formatMoney } from '../lib/format'
+import { currencyOptions } from '../api/types'
 import type { FormEvent } from 'react'
 
 export function DashboardPage() {
@@ -21,10 +22,12 @@ export function DashboardPage() {
   const createTransaction = useCreateTransaction()
 
   const [amount, setAmount] = useState('')
+  const [expenseCurrency, setExpenseCurrency] = useState('')
   const [categoryId, setCategoryId] = useState('')
   const [note, setNote] = useState('')
 
   const currency = summary?.currency ?? 'RSD'
+  const selectedCurrency = expenseCurrency || currency
 
   const byCategory = useMemo(() => {
     if (!transactions?.length) return []
@@ -43,7 +46,7 @@ export function DashboardPage() {
 
     await createTransaction.mutateAsync({
       amount: parsed,
-      currency,
+      currency: selectedCurrency,
       categoryId: categoryId || undefined,
       note: note.trim() || undefined,
     })
@@ -132,7 +135,7 @@ export function DashboardPage() {
       <Card>
         <CardTitle>Быстрый расход</CardTitle>
         <form onSubmit={(e) => void handleSubmit(e)} className="mt-4 space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-3">
             <Input
               label="Сумма"
               type="text"
@@ -141,6 +144,12 @@ export function DashboardPage() {
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               required
+            />
+            <Select
+              label="Валюта"
+              value={selectedCurrency}
+              onChange={(e) => setExpenseCurrency(e.target.value)}
+              options={currencyOptions}
             />
             <Select
               label="Категория"

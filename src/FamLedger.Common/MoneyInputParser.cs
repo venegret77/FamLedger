@@ -47,45 +47,64 @@ public static partial class MoneyInputParser
 
         var raw = text.Trim().Replace('\u00A0', ' ');
 
-        // $10 / €12,5
+        // $10 / €12,5 [комментарий]
         var symbolPrefix = SymbolPrefixRegex().Match(raw);
         if (symbolPrefix.Success)
-            return Finish(symbolPrefix.Groups["amount"].Value, symbolPrefix.Groups["symbol"].Value, out result);
+            return Finish(
+                symbolPrefix.Groups["amount"].Value,
+                symbolPrefix.Groups["symbol"].Value,
+                Remainder(symbolPrefix),
+                out result);
 
-        // 10$ / 12,5€
+        // 10$ / 12,5€ [комментарий]
         var symbolSuffix = SymbolSuffixRegex().Match(raw);
         if (symbolSuffix.Success)
-            return Finish(symbolSuffix.Groups["amount"].Value, symbolSuffix.Groups["symbol"].Value, out result);
+            return Finish(
+                symbolSuffix.Groups["amount"].Value,
+                symbolSuffix.Groups["symbol"].Value,
+                Remainder(symbolSuffix),
+                out result);
 
-        // 10usd / 10eur / 12,5RSD (код сразу после числа)
+        // 10usd / 10.5eur / 12,5RSD
         var glued = GluedCurrencyRegex().Match(raw);
         if (glued.Success && TryResolveCurrency(glued.Groups["code"].Value, out var gluedCurrency))
-            return Finish(glued.Groups["amount"].Value, gluedCurrency, out result);
+            return Finish(glued.Groups["amount"].Value, gluedCurrency, Remainder(glued), out result);
 
-        // usd 10 | 10 usd | euro 10 | 10 евро
+        // usd 10 | 10.5 usd | 10,6 евро
         var spaced = SpacedCurrencyRegex().Match(raw);
         if (spaced.Success && TryResolveCurrency(spaced.Groups["code"].Value, out var spacedCurrency))
-            return Finish(spaced.Groups["amount"].Value, spacedCurrency, out result);
+            return Finish(spaced.Groups["amount"].Value, spacedCurrency, Remainder(spaced), out result);
 
         // просто число → RSD
         var plain = PlainAmountRegex().Match(raw);
         if (plain.Success)
-            return Finish(plain.Groups["amount"].Value, CurrencyCode.Rsd, out result);
+            return Finish(plain.Groups["amount"].Value, CurrencyCode.Rsd, Remainder(plain), out result);
 
         return false;
     }
 
-    private static bool Finish(string amountText, string currencyOrToken, out ParsedMoneyInput result)
+    private static string? Remainder(Match match)
+    {
+        var value = match.Groups["remainder"].Value.Trim();
+        return value.Length == 0 ? null : value;
+    }
+
+    private static bool Finish(
+        string amountText,
+        string currencyOrToken,
+        string? remainder,
+        out ParsedMoneyInput result)
     {
         result = default;
         amountText = amountText.Replace(" ", "").Replace(',', '.');
-        if (!decimal.TryParse(amountText, NumberStyles.Any, CultureInfo.InvariantCulture, out var amount) || amount <= 0)
+        if (!decimal.TryParse(amountText, NumberStyles.Number, CultureInfo.InvariantCulture, out var amount)
+            || amount <= 0)
             return false;
 
         if (!TryResolveCurrency(currencyOrToken, out var currency))
             currency = CurrencyCode.Rsd;
 
-        result = new ParsedMoneyInput(amount, currency, null);
+        result = new ParsedMoneyInput(amount, currency, remainder);
         return true;
     }
 
@@ -108,22 +127,27 @@ public static partial class MoneyInputParser
         return CurrencyAliases.TryGetValue(token, out currency!);
     }
 
-    [GeneratedRegex(@"^(?<symbol>[€$])\s*(?<amount>[\d\s]+(?:[.,]\d+)?)\s*$", RegexOptions.CultureInvariant)]
+    // optional remainder = комментарий после суммы
+    private const string Tail = @"(?:\s+(?<remainder>.+))?";
+
+    [GeneratedRegex(@"^(?<symbol>[€$])\s*(?<amount>[\d\s]+(?:[.,]\d+)?)" + Tail + @"\s*$", RegexOptions.CultureInvariant)]
     private static partial Regex SymbolPrefixRegex();
 
-    [GeneratedRegex(@"^(?<amount>[\d\s]+(?:[.,]\d+)?)\s*(?<symbol>[€$])\s*$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^(?<amount>[\d\s]+(?:[.,]\d+)?)\s*(?<symbol>[€$])" + Tail + @"\s*$", RegexOptions.CultureInvariant)]
     private static partial Regex SymbolSuffixRegex();
 
     [GeneratedRegex(
-        @"^(?<amount>[\d\s]+(?:[.,]\d+)?)(?<code>usd|eur|rsd|euro|euros|dollar|dollars|din|dinar|евро|долл(?:ар(?:а|ов)?)?|дин(?:ар(?:а|ов)?)?)\s*$",
+        @"^(?<amount>[\d\s]+(?:[.,]\d+)?)(?<code>usd|eur|rsd|euro|euros|dollar|dollars|din|dinar|евро|долл(?:ар(?:а|ов)?)?|дин(?:ар(?:а|ов)?)?)"
+        + Tail + @"\s*$",
         RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
     private static partial Regex GluedCurrencyRegex();
 
     [GeneratedRegex(
-        @"^(?:(?<code>[A-Za-zА-Яа-яЁё€$]+)\s+(?<amount>[\d\s]+(?:[.,]\d+)?)|(?<amount>[\d\s]+(?:[.,]\d+)?)\s+(?<code>[A-Za-zА-Яа-яЁё€$]+))\s*$",
+        @"^(?:(?<code>[A-Za-zА-Яа-яЁё€$]+)\s+(?<amount>[\d\s]+(?:[.,]\d+)?)|(?<amount>[\d\s]+(?:[.,]\d+)?)\s+(?<code>[A-Za-zА-Яа-яЁё€$]+))"
+        + Tail + @"\s*$",
         RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
     private static partial Regex SpacedCurrencyRegex();
 
-    [GeneratedRegex(@"^(?<amount>[\d\s]+(?:[.,]\d+)?)\s*$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^(?<amount>[\d\s]+(?:[.,]\d+)?)" + Tail + @"\s*$", RegexOptions.CultureInvariant)]
     private static partial Regex PlainAmountRegex();
 }

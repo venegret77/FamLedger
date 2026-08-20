@@ -73,9 +73,9 @@ public class TelegramBot(
                     $"Привет, {user.DisplayName ?? user.FirstName}!\n\n" +
                     "Отправь сумму расхода, например:\n" +
                     "• 1000\n" +
-                    "• 10 usd / 10eur\n" +
-                    "• 15 eur / €15\n" +
-                    "• $20\n\n" +
+                    "• 10.5 usd / 10,6 eur\n" +
+                    "• 15eur / €15.5\n" +
+                    "• $20 кофе\n\n" +
                     "Без валюты считается в динарах (RSD).\n\n" +
                     "Для входа на сайт: /start login",
                     cancellationToken: ct);
@@ -96,6 +96,7 @@ public class TelegramBot(
                     Step = "pick_category",
                     PendingAmount = parsed.Amount,
                     PendingCurrency = parsed.Currency,
+                    PendingNote = parsed.Remainder,
                     PendingContextId = spendContext.Id
                 };
                 await dialogState.SetAsync(chatId, state, TimeSpan.FromHours(1), ct);
@@ -122,7 +123,7 @@ public class TelegramBot(
             }
 
             await client.SendMessage(chatId,
-                "Отправь сумму, например: 1000, 10 usd, 15 eur, $20 — или /start",
+                "Отправь сумму, например: 1000, 10.5 usd, 10,6 eur, $20 кофе — или /start",
                 cancellationToken: ct);
         }
 
@@ -149,7 +150,7 @@ public class TelegramBot(
                     state.PendingAmount.Value,
                     state.PendingCurrency ?? "RSD",
                     categoryId,
-                    null,
+                    state.PendingNote,
                     null,
                     ct);
                 await dialogState.ClearAsync(chatId, ct);
