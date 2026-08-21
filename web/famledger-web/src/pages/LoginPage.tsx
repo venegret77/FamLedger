@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
-import { useQueryClient } from '@tanstack/react-query'
-import { queryKeys } from '../api/hooks'
+import { useLocation } from 'react-router-dom'
 import { Card, CardDescription, CardTitle } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 
@@ -43,34 +41,34 @@ function parseTelegramAuthFromUrl(search: string, hash: string): TelegramWidgetU
   }
 }
 
-async function exchangeBotToken(
-  token: string,
-  queryClient: ReturnType<typeof useQueryClient>,
-): Promise<void> {
+function redirectAfterLogin(from: string) {
+  // Hard reload: Telegram WebView часто не обновляет SPA после Login Widget.
+  const target = from.startsWith('/') ? from : '/'
+  window.location.replace(target)
+}
+
+async function readError(res: Response): Promise<string> {
+  let message = `Ошибка ${res.status}`
+  try {
+    const body = (await res.json()) as { message?: string }
+    if (body.message) message = body.message
+  } catch {
+    /* ignore */
+  }
+  return message
+}
+
+async function exchangeBotToken(token: string): Promise<void> {
   const res = await fetch(`${API_URL}/api/auth/bot`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
     body: JSON.stringify({ token }),
   })
-  if (!res.ok) {
-    let message = `Ошибка ${res.status}`
-    try {
-      const body = (await res.json()) as { message?: string }
-      if (body.message) message = body.message
-    } catch {
-      const text = await res.text()
-      if (text) message = text
-    }
-    throw new Error(message)
-  }
-  await queryClient.invalidateQueries({ queryKey: queryKeys.me })
+  if (!res.ok) throw new Error(await readError(res))
 }
 
-async function exchangeTelegramWidget(
-  user: TelegramWidgetUser,
-  queryClient: ReturnType<typeof useQueryClient>,
-): Promise<void> {
+async function exchangeTelegramWidget(user: TelegramWidgetUser): Promise<void> {
   const res = await fetch(`${API_URL}/api/auth/telegram`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -85,29 +83,34 @@ async function exchangeTelegramWidget(
       hash: user.hash,
     }),
   })
-  if (!res.ok) {
-    let message = `Ошибка ${res.status}`
-    try {
-      const body = (await res.json()) as { message?: string }
-      if (body.message) message = body.message
-    } catch {
-      /* ignore */
-    }
-    throw new Error(message)
+  if (!res.ok) throw new Error(await readError(res))
+}
+
+async function exchangeWebApp(initData: string): Promise<void> {
+  const res = await fetch(`${API_URL}/api/auth/webapp`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ initData }),
+  })
+  if (!res.ok) throw new Error(await readError(res))
+}
+
+declare global {
+  interface Window {
+    onFamLedgerTelegramAuth?: (user: TelegramWidgetUser) => void
   }
-  await queryClient.invalidateQueries({ queryKey: queryKeys.me })
 }
 
 export function LoginPage() {
-  const navigate = useNavigate()
   const location = useLocation()
-  const queryClient = useQueryClient()
   const widgetHostRef = useRef<HTMLDivElement>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [manualToken, setManualToken] = useState('')
   const [botOpened, setBotOpened] = useState(false)
   const handledRedirect = useRef(false)
+  const handledWebApp = useRef(false)
 
   const from = (location.state as { from?: string } | null)?.from ?? '/'
   const botLoginUrl = BOT_USERNAME ? `https://t.me/${BOT_USERNAME}?start=login` : null
@@ -117,15 +120,27 @@ export function LoginPage() {
     setError(null)
     try {
       await action()
-      navigate(from, { replace: true })
+      redirectAfterLogin(from)
       return true
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось войти')
-      return false
-    } finally {
       setLoading(false)
+      return false
     }
   }
+
+  // Mini App: уже внутри Telegram — логинимся по initData без виджета
+  useEffect(() => {
+    if (handledWebApp.current) return
+    const tg = window.Telegram?.WebApp
+    const initData = tg?.initData
+    if (!initData) return
+    handledWebApp.current = true
+    tg.ready?.()
+    tg.expand?.()
+    void finish(() => exchangeWebApp(initData))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Telegram Login Widget redirect: /login?id=...&hash=...
   useEffect(() => {
@@ -134,17 +149,30 @@ export function LoginPage() {
     if (!user) return
     handledRedirect.current = true
     void (async () => {
-      const ok = await finish(() => exchangeTelegramWidget(user, queryClient))
+      const ok = await finish(() => exchangeTelegramWidget(user))
       if (!ok) {
         handledRedirect.current = false
-        navigate('/login', { replace: true })
+        window.history.replaceState({}, '', '/login')
       }
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.search, location.hash])
 
+  // Callback от Login Widget (надёжнее redirect внутри Telegram WebView)
+  useEffect(() => {
+    window.onFamLedgerTelegramAuth = (user) => {
+      void finish(() => exchangeTelegramWidget(user))
+    }
+    return () => {
+      delete window.onFamLedgerTelegramAuth
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [from])
+
   useEffect(() => {
     if (!BOT_USERNAME || !widgetHostRef.current) return
+    // В Mini App виджет не нужен — уже логинимся через initData
+    if (window.Telegram?.WebApp?.initData) return
 
     const host = widgetHostRef.current
     host.innerHTML = ''
@@ -155,8 +183,7 @@ export function LoginPage() {
     script.setAttribute('data-size', 'large')
     script.setAttribute('data-radius', '12')
     script.setAttribute('data-request-access', 'write')
-    // Редирект надёжнее data-onauth: Telegram вернёт на /login?id=&hash=
-    script.setAttribute('data-auth-url', `${window.location.origin}/login`)
+    script.setAttribute('data-onauth', 'onFamLedgerTelegramAuth(user)')
     host.appendChild(script)
 
     return () => {
@@ -178,11 +205,17 @@ export function LoginPage() {
         <Card className="shadow-md">
           <CardTitle>Вход</CardTitle>
           <CardDescription>
-            Открой Telegram — бот пришлёт код. Либо войди через браузер ниже.
+            {window.Telegram?.WebApp?.initData
+              ? 'Входим через Telegram…'
+              : 'Открой Telegram — бот пришлёт код. Либо войди через браузер ниже.'}
           </CardDescription>
 
           <div className="mt-6 space-y-4">
-            {BOT_USERNAME && botLoginUrl ? (
+            {loading && (
+              <p className="text-center text-sm text-slate-500">Входим…</p>
+            )}
+
+            {BOT_USERNAME && botLoginUrl && !window.Telegram?.WebApp?.initData ? (
               <>
                 <a
                   href={botLoginUrl}
@@ -204,7 +237,7 @@ export function LoginPage() {
                   onSubmit={(e) => {
                     e.preventDefault()
                     const token = manualToken.trim()
-                    if (token) void finish(() => exchangeBotToken(token, queryClient))
+                    if (token) void finish(() => exchangeBotToken(token))
                   }}
                 >
                   <input
@@ -227,10 +260,6 @@ export function LoginPage() {
                   </Button>
                 </form>
 
-                {loading && (
-                  <p className="text-center text-sm text-slate-500">Входим…</p>
-                )}
-
                 <div className="relative flex items-center gap-3 py-1">
                   <div className="h-px flex-1 bg-slate-200" />
                   <span className="text-xs text-slate-400">или</span>
@@ -239,12 +268,12 @@ export function LoginPage() {
 
                 <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-4">
                   <p className="text-center text-sm font-medium text-slate-700">
-                    Войти через браузер
+                    Войти через Telegram
                   </p>
                   <div className="flex min-h-[44px] justify-center" ref={widgetHostRef} />
                 </div>
               </>
-            ) : (
+            ) : !BOT_USERNAME ? (
               <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
                 <p className="font-medium">Бот не настроен</p>
                 <p className="mt-1 text-amber-800/90">
@@ -252,7 +281,7 @@ export function LoginPage() {
                   <code className="rounded bg-amber-100 px-1">.env</code> и пересоберите web.
                 </p>
               </div>
-            )}
+            ) : null}
 
             {error && (
               <p className="rounded-lg bg-red-50 px-3 py-2 text-center text-sm text-red-700">

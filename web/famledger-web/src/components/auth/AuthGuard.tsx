@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { useMe } from '../../api/hooks'
 import { ApiError } from '../../api/client'
@@ -39,16 +40,19 @@ export function AuthGuard() {
 export function GuestGuard() {
   const { isAuthenticated, isChecking } = useAuthState()
 
-  if (isChecking) {
+  useEffect(() => {
+    if (isAuthenticated) {
+      // Hard reload — Telegram WebView часто не применяет SPA-редирект после логина
+      window.location.replace('/')
+    }
+  }, [isAuthenticated])
+
+  if (isChecking || isAuthenticated) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50">
         <Spinner />
       </div>
     )
-  }
-
-  if (isAuthenticated) {
-    return <Navigate to="/" replace />
   }
 
   return <Outlet />

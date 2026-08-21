@@ -130,6 +130,7 @@ public interface IAuthService
         long authDate,
         string hash,
         CancellationToken ct = default);
+    Task<string> AuthenticateTelegramWebAppAsync(string initData, CancellationToken ct = default);
     Task<string> AuthenticateByTelegramUserAsync(long telegramUserId, string? username, string? firstName, CancellationToken ct = default);
     bool ValidateTelegramHash(Dictionary<string, string> fields, string hash);
 }

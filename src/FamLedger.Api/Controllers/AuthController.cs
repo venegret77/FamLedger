@@ -20,6 +20,7 @@ public class AuthController(IAuthService authService, ILoginTokenService loginTo
         string Hash);
 
     public record BotLoginRequest(string Token);
+    public record WebAppLoginRequest(string InitData);
 
     [HttpPost("telegram")]
     public async Task<IActionResult> TelegramLogin([FromBody] TelegramAuthRequest request, CancellationToken ct)
@@ -36,6 +37,21 @@ public class AuthController(IAuthService authService, ILoginTokenService loginTo
                 request.Hash,
                 ct);
 
+            AppendAuthCookie(token);
+            return Ok(new { success = true });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Unauthorized(new { message = ex.Message });
+        }
+    }
+
+    [HttpPost("webapp")]
+    public async Task<IActionResult> WebAppLogin([FromBody] WebAppLoginRequest request, CancellationToken ct)
+    {
+        try
+        {
+            var token = await authService.AuthenticateTelegramWebAppAsync(request.InitData, ct);
             AppendAuthCookie(token);
             return Ok(new { success = true });
         }
