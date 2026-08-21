@@ -58,9 +58,9 @@ public class TelegramBot(
             var chatId = msg.Chat.Id;
             var telegramUserId = msg.From?.Id ?? chatId;
             var user = await userService.GetOrCreateByTelegramAsync(telegramUserId, msg.From?.Username, msg.From?.FirstName, ct);
-            var (command, payload) = ParseCommand(msg.Text);
+            var (command, payload) = ParseIntent(msg.Text);
 
-            if (command is "/start")
+            if (command is "start")
             {
                 if (payload.StartsWith("login", StringComparison.OrdinalIgnoreCase))
                 {
@@ -83,22 +83,22 @@ public class TelegramBot(
                     "• 10 eur хостинг\n" +
                     "• 10.5 usd / €15.5 / $20\n\n" +
                     $"Без валюты — {baseCur}.\n\n" +
-                    "Команды:\n" +
-                    "• /пополнить 500 премия — пополнение\n" +
-                    "• /статистика — баланс периода\n" +
-                    "• /долг 1000 Ивану — записать в долг\n" +
+                    "Ещё можно так:\n" +
+                    "• пополнить 500 премия\n" +
+                    "• статистика\n" +
+                    "• долг 1000 Ивану\n" +
                     "• /start login — код для сайта",
                     cancellationToken: ct);
                 return;
             }
 
-            if (command is "/статистика" or "/stats")
+            if (command is "статистика" or "stats")
             {
                 await HandleStatsAsync(client, chatId, user, contextService, periodService, calculator, ct);
                 return;
             }
 
-            if (command is "/пополнить" or "/topup")
+            if (command is "пополнить" or "topup")
             {
                 var topUpContext = await ResolveSpendContextAsync(contextService, user.Id, user.ActiveContextId, ct);
                 if (topUpContext is null)
@@ -110,7 +110,7 @@ public class TelegramBot(
                 if (!MoneyInputParser.TryParse(payload, out var topUpParsed, topUpContext.BaseCurrency))
                 {
                     await client.SendMessage(chatId,
-                        "Пример: /пополнить 1000 премия или /пополнить 50 eur кэшбек",
+                        "Пример: пополнить 1000 премия или пополнить 50 eur кэшбек",
                         cancellationToken: ct);
                     return;
                 }
@@ -121,7 +121,7 @@ public class TelegramBot(
                 return;
             }
 
-            if (command is "/долг" or "/debt")
+            if (command is "долг" or "debt")
             {
                 var debtContext = await ResolveSpendContextAsync(contextService, user.Id, user.ActiveContextId, ct);
                 if (debtContext is null)
@@ -133,7 +133,7 @@ public class TelegramBot(
                 if (!MoneyInputParser.TryParse(payload, out var debtParsed, debtContext.BaseCurrency))
                 {
                     await client.SendMessage(chatId,
-                        "Пример: /долг 1000 обед или /долг 20 eur такси",
+                        "Пример: долг 1000 обед или долг 20 eur такси",
                         cancellationToken: ct);
                     return;
                 }
@@ -174,7 +174,7 @@ public class TelegramBot(
                 return;
             }
 
-            if (command.StartsWith('/'))
+            if (msg.Text.TrimStart().StartsWith('/'))
             {
                 await client.SendMessage(chatId,
                     "Неизвестная команда. /start — справка.",
@@ -198,7 +198,7 @@ public class TelegramBot(
             }
 
             await client.SendMessage(chatId,
-                "Отправь сумму (1000 кофе, 10 eur хостинг) или /start",
+                "Отправь сумму (1000 кофе, 10 eur хостинг), пополнить / статистика / долг — или /start",
                 cancellationToken: ct);
             return;
         }
@@ -487,12 +487,18 @@ public class TelegramBot(
         return Task.CompletedTask;
     }
 
-    private static (string Command, string Payload) ParseCommand(string text)
+    /// <summary>
+    /// First word as intent (optional leading /), rest as payload.
+    /// Examples: "пополнить 500", "/start login", "статистика".
+    /// </summary>
+    private static (string Command, string Payload) ParseIntent(string text)
     {
         var parts = text.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
         var command = parts[0];
         var at = command.IndexOf('@');
         if (at >= 0) command = command[..at];
+        if (command.StartsWith('/'))
+            command = command[1..];
         var payload = parts.Length > 1 ? parts[1].Trim() : string.Empty;
         return (command.ToLowerInvariant(), payload);
     }
