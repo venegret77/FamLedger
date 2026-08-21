@@ -213,6 +213,7 @@ export type ReminderKind =
   | 'EveningCheckIn'
   | 'PeriodEnding'
   | 'UnpaidDebts'
+  | 'UnpaidPlanned'
 
 export interface Reminder {
   id: string

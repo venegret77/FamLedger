@@ -52,6 +52,13 @@ const STANDARD_META: Record<
     needsTime: true,
     needsThreshold: false,
   },
+  UnpaidPlanned: {
+    title: 'Неоплаченные плановые',
+    description:
+      'Если день списания постоянного расхода уже наступил, а он не отмечен оплаченным.',
+    needsTime: true,
+    needsThreshold: false,
+  },
 }
 
 export function RemindersPage() {

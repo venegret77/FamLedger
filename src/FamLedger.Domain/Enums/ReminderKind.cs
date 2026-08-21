@@ -8,4 +8,5 @@ public enum ReminderKind
     EveningCheckIn = 3,
     PeriodEnding = 4,
     UnpaidDebts = 5,
+    UnpaidPlanned = 6,
 }

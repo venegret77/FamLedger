@@ -15,6 +15,7 @@ public class ReminderService(AppDbContext db) : IReminderService
         ReminderKind.EveningCheckIn,
         ReminderKind.PeriodEnding,
         ReminderKind.UnpaidDebts,
+        ReminderKind.UnpaidPlanned,
     ];
 
     public async Task<IReadOnlyList<Reminder>> ListVisibleAsync(
@@ -191,7 +192,8 @@ public class ReminderService(AppDbContext db) : IReminderService
                  || r.Kind == ReminderKind.DailyBalance
                  || r.Kind == ReminderKind.EveningCheckIn
                  || r.Kind == ReminderKind.PeriodEnding
-                 || r.Kind == ReminderKind.UnpaidDebts))
+                 || r.Kind == ReminderKind.UnpaidDebts
+                 || r.Kind == ReminderKind.UnpaidPlanned))
             .ToListAsync(ct);
     }
 
@@ -218,6 +220,7 @@ public class ReminderService(AppDbContext db) : IReminderService
         ReminderKind.DailyBalance => new TimeOnly(18, 0),
         ReminderKind.EveningCheckIn => new TimeOnly(19, 0),
         ReminderKind.UnpaidDebts => new TimeOnly(10, 0),
+        ReminderKind.UnpaidPlanned => new TimeOnly(17, 0),
         ReminderKind.BudgetAlert => null,
         ReminderKind.PeriodEnding => new TimeOnly(9, 0),
         _ => new TimeOnly(12, 0),
@@ -226,7 +229,7 @@ public class ReminderService(AppDbContext db) : IReminderService
     private static bool NeedsTime(ReminderKind kind) =>
         kind is ReminderKind.Custom or ReminderKind.DailyBalance
             or ReminderKind.EveningCheckIn or ReminderKind.UnpaidDebts
-            or ReminderKind.PeriodEnding;
+            or ReminderKind.UnpaidPlanned or ReminderKind.PeriodEnding;
 
     private static void ValidateAudience(ReminderAudience audience, bool isPersonalContext)
     {

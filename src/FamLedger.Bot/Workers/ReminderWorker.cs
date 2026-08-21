@@ -51,7 +51,7 @@ public class ReminderWorker(IServiceScopeFactory scopeFactory, ILogger<ReminderW
             try
             {
                 var message = await BuildTimedMessageAsync(
-                    reminder, calculator, periodService, debtService, todayUtc, ct);
+                    reminder, calculator, periodService, debtService, db, todayUtc, ct);
                 if (message is null) continue;
 
                 await SendAsync(notifications, reminder, message, ct);
@@ -97,6 +97,7 @@ public class ReminderWorker(IServiceScopeFactory scopeFactory, ILogger<ReminderW
         IBudgetCalculatorService calculator,
         IBudgetPeriodService periodService,
         IDebtService debtService,
+        AppDbContext db,
         DateOnly todayUtc,
         CancellationToken ct)
     {
@@ -150,9 +151,61 @@ public class ReminderWorker(IServiceScopeFactory scopeFactory, ILogger<ReminderW
                 return "💳 Незакрытые долги:\n" + string.Join("\n", lines);
             }
 
+            case ReminderKind.UnpaidPlanned:
+            {
+                var context = reminder.Context;
+                if (context is null) return null;
+                var period = await periodService.EnsureActivePeriodAsync(context, ct);
+                var items = await db.PeriodRecurringItems
+                    .AsNoTracking()
+                    .Include(i => i.RecurringExpense)
+                    .Where(i =>
+                        i.PeriodId == period.Id &&
+                        !i.IsPaid &&
+                        !i.IsSkipped)
+                    .ToListAsync(ct);
+
+                var due = items
+                    .Select(i =>
+                    {
+                        var chargeDate = ResolveChargeDateInPeriod(period, i.RecurringExpense.ChargeDayOfMonth);
+                        return (Item: i, ChargeDate: chargeDate);
+                    })
+                    .Where(x => x.ChargeDate is { } d && d <= todayUtc)
+                    .OrderBy(x => x.ChargeDate)
+                    .ToList();
+
+                if (due.Count == 0) return null;
+
+                var lines = due.Select(x =>
+                {
+                    var name = x.Item.RecurringExpense.Name;
+                    var amount = MoneyFormatter.Format(x.Item.PlannedBaseAmount, context.BaseCurrency);
+                    var when = x.ChargeDate == todayUtc
+                        ? "сегодня"
+                        : $"с {x.ChargeDate:dd.MM}";
+                    return $"• {name}: {amount} ({when})";
+                });
+                return "📌 Неоплаченные плановые:\n" + string.Join("\n", lines);
+            }
+
             default:
                 return null;
         }
+    }
+
+    /// <summary>
+    /// Дата списания внутри периода: день ChargeDayOfMonth между Start и End.
+    /// </summary>
+    private static DateOnly? ResolveChargeDateInPeriod(Domain.Entities.BudgetPeriod period, int chargeDay)
+    {
+        chargeDay = Math.Clamp(chargeDay, 1, 28);
+        for (var d = period.StartDate; d <= period.EndDate; d = d.AddDays(1))
+        {
+            if (d.Day == chargeDay)
+                return d;
+        }
+        return null;
     }
 
     private static async Task SendAsync(
