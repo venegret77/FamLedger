@@ -74,21 +74,13 @@ public class TelegramBot(
                     return;
                 }
 
-                var spendContext = await ResolveSpendContextAsync(contextService, user.Id, user.ActiveContextId, ct);
-                var baseCur = spendContext?.BaseCurrency ?? "RSD";
-                await client.SendMessage(chatId,
-                    $"Привет, {user.DisplayName ?? user.FirstName}!\n\n" +
-                    "Списание — просто отправь сумму:\n" +
-                    "• 1000 кофе\n" +
-                    "• 10 eur хостинг\n" +
-                    "• 10.5 usd / €15.5 / $20\n\n" +
-                    $"Без валюты — {baseCur}.\n\n" +
-                    "Ещё можно так:\n" +
-                    "• пополнить 500 премия\n" +
-                    "• статистика\n" +
-                    "• долг 1000 Ивану\n" +
-                    "• /start login — код для сайта",
-                    cancellationToken: ct);
+                await SendHelpAsync(client, chatId, user, contextService, ct);
+                return;
+            }
+
+            if (command is "справка" or "help" or "меню" or "menu")
+            {
+                await SendHelpAsync(client, chatId, user, contextService, ct);
                 return;
             }
 
@@ -198,7 +190,8 @@ public class TelegramBot(
             }
 
             await client.SendMessage(chatId,
-                "Отправь сумму (1000 кофе, 10 eur хостинг), пополнить / статистика / долг — или /start",
+                "Не понял. Напиши сумму, пополнить / долг / статистика — или справка",
+                replyMarkup: MainMenuKeyboard(),
                 cancellationToken: ct);
             return;
         }
@@ -228,6 +221,44 @@ public class TelegramBot(
             }
         }
     }
+
+    private static async Task SendHelpAsync(
+        ITelegramBotClient client,
+        long chatId,
+        Domain.Entities.User user,
+        IContextService contextService,
+        CancellationToken ct)
+    {
+        var spendContext = await ResolveSpendContextAsync(contextService, user.Id, user.ActiveContextId, ct);
+        var baseCur = spendContext?.BaseCurrency ?? "RSD";
+        var name = user.DisplayName ?? user.FirstName ?? "друг";
+
+        await client.SendMessage(chatId,
+            $"Привет, {name}!\n\n" +
+            "Списание — просто отправь сумму:\n" +
+            "• 1000 кофе\n" +
+            "• 10 eur хостинг\n" +
+            "• 10.5 usd / €15.5 / $20\n\n" +
+            $"Без валюты — {baseCur}.\n\n" +
+            "Текст без слеша:\n" +
+            "• пополнить 500 премия\n" +
+            "• статистика\n" +
+            "• долг 1000 Ивану\n" +
+            "• справка / меню — эта подсказка\n\n" +
+            "Для входа на сайт: /start login",
+            replyMarkup: MainMenuKeyboard(),
+            cancellationToken: ct);
+    }
+
+    private static ReplyKeyboardMarkup MainMenuKeyboard() =>
+        new([
+            ["статистика", "справка"],
+            ["пополнить", "долг"],
+        ])
+        {
+            ResizeKeyboard = true,
+            IsPersistent = true,
+        };
 
     private static async Task HandleStatsAsync(
         ITelegramBotClient client,
