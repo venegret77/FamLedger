@@ -1,5 +1,6 @@
 using FamLedger.Common;
 using FamLedger.Domain.Entities;
+using FamLedger.Domain.Enums;
 using FamLedger.Interfaces.Services;
 using FamLedger.Repository;
 using Microsoft.EntityFrameworkCore;
@@ -12,12 +13,21 @@ public class ExpenseService(
     IExchangeRateService exchangeRateService,
     IRedisService redis) : IExpenseService
 {
-    public async Task<Transaction> AddAsync(Guid contextId, Guid userId, decimal amount, string currency, Guid? categoryId, string? note, DateOnly? date, CancellationToken ct = default)
+    public async Task<Transaction> AddAsync(
+        Guid contextId,
+        Guid userId,
+        decimal amount,
+        string currency,
+        Guid? categoryId,
+        string? note,
+        DateOnly? date,
+        TransactionKind kind = TransactionKind.Expense,
+        CancellationToken ct = default)
     {
         var context = await db.BudgetContexts.FindAsync([contextId], ct) ?? throw new InvalidOperationException("Context not found");
         var period = await periodService.EnsureActivePeriodAsync(context, ct);
         var txDate = date ?? DateOnly.FromDateTime(DateTime.UtcNow);
-        var baseAmount = currency.Equals("RSD", StringComparison.OrdinalIgnoreCase)
+        var baseAmount = currency.Equals(context.BaseCurrency, StringComparison.OrdinalIgnoreCase)
             ? amount
             : await exchangeRateService.ConvertToBaseAsync(amount, currency, txDate, contextId, period.Id, ct);
 
@@ -27,6 +37,7 @@ public class ExpenseService(
             PeriodId = period.Id,
             CategoryId = categoryId,
             CreatedByUserId = userId,
+            Kind = kind,
             Amount = amount,
             Currency = currency.ToUpperInvariant(),
             BaseAmount = baseAmount,

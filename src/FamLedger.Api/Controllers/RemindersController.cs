@@ -16,12 +16,19 @@ public class RemindersController(
     IUserService userService,
     IReminderService reminderService) : ControllerBase
 {
-    public record ReminderRequest(string Message, string TimeUtc, string Audience, bool? IsEnabled);
+    public record ReminderRequest(
+        string? Message,
+        string? TimeUtc,
+        string Audience,
+        bool? IsEnabled,
+        string? Kind,
+        int? ThresholdPercent);
 
     [HttpGet]
     public async Task<IActionResult> List(CancellationToken ct)
     {
         var (context, userId) = await GetActiveContextAsync(ct);
+        await reminderService.EnsureDefaultsAsync(context.Id, userId, context.IsPersonal, ct);
         var items = await reminderService.ListVisibleAsync(context.Id, userId, ct);
         return Ok(items.Select(r => ToDto(r, userId)));
     }
@@ -32,10 +39,16 @@ public class RemindersController(
         try
         {
             var (context, userId) = await GetActiveContextAsync(ct);
-            if (!TryParseTime(request.TimeUtc, out var timeUtc))
-                return BadRequest(new { message = "Invalid timeUtc, expected HH:mm" });
             if (!TryParseAudience(request.Audience, out var audience))
                 return BadRequest(new { message = "Invalid audience" });
+
+            TimeOnly? timeUtc = null;
+            if (!string.IsNullOrWhiteSpace(request.TimeUtc))
+            {
+                if (!TryParseTime(request.TimeUtc, out var parsed))
+                    return BadRequest(new { message = "Invalid timeUtc, expected HH:mm" });
+                timeUtc = parsed;
+            }
 
             var reminder = await reminderService.CreateAsync(
                 context.Id,
@@ -43,6 +56,8 @@ public class RemindersController(
                 request.Message,
                 timeUtc,
                 audience,
+                ReminderKind.Custom,
+                request.ThresholdPercent,
                 context.IsPersonal,
                 ct);
 
@@ -68,10 +83,16 @@ public class RemindersController(
         try
         {
             var (context, userId) = await GetActiveContextAsync(ct);
-            if (!TryParseTime(request.TimeUtc, out var timeUtc))
-                return BadRequest(new { message = "Invalid timeUtc, expected HH:mm" });
             if (!TryParseAudience(request.Audience, out var audience))
                 return BadRequest(new { message = "Invalid audience" });
+
+            TimeOnly? timeUtc = null;
+            if (!string.IsNullOrWhiteSpace(request.TimeUtc))
+            {
+                if (!TryParseTime(request.TimeUtc, out var parsed))
+                    return BadRequest(new { message = "Invalid timeUtc, expected HH:mm" });
+                timeUtc = parsed;
+            }
 
             await reminderService.UpdateAsync(
                 id,
@@ -80,6 +101,7 @@ public class RemindersController(
                 timeUtc,
                 audience,
                 request.IsEnabled ?? true,
+                request.ThresholdPercent,
                 context.IsPersonal,
                 ct);
 
@@ -131,13 +153,16 @@ public class RemindersController(
     private static object ToDto(Domain.Entities.Reminder r, Guid currentUserId) => new
     {
         r.Id,
+        Kind = r.Kind.ToString(),
         r.Message,
-        TimeUtc = r.TimeUtc.ToString("HH:mm"),
+        TimeUtc = r.TimeUtc?.ToString("HH:mm"),
+        r.ThresholdPercent,
         Audience = r.Audience.ToString(),
         r.IsEnabled,
         CreatedByUserId = r.CreatedByUserId,
         CreatedByName = r.CreatedByUser.DisplayName ?? r.CreatedByUser.FirstName ?? r.CreatedByUser.Username,
         CanEdit = r.CreatedByUserId == currentUserId,
+        IsStandard = r.Kind != ReminderKind.Custom,
         CreatedAtUtc = r.CreatedAtUtc,
         UpdatedAtUtc = r.UpdatedAtUtc,
     };

@@ -1,3 +1,5 @@
+using FamLedger.Domain.Enums;
+
 namespace FamLedger.Domain.Entities;
 
 public class Transaction
@@ -7,6 +9,7 @@ public class Transaction
     public Guid PeriodId { get; set; }
     public Guid? CategoryId { get; set; }
     public Guid CreatedByUserId { get; set; }
+    public TransactionKind Kind { get; set; } = TransactionKind.Expense;
     public decimal Amount { get; set; }
     public string Currency { get; set; } = ValueObjects.CurrencyCode.Rsd;
     public decimal BaseAmount { get; set; }

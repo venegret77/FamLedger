@@ -3,6 +3,7 @@ namespace FamLedger.Domain.Models;
 public class BudgetSummary
 {
     public decimal Income { get; set; }
+    public decimal TopUps { get; set; }
     public decimal PlannedExpenses { get; set; }
     public decimal Spent { get; set; }
     public decimal Carryover { get; set; }

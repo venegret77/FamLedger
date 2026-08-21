@@ -55,7 +55,10 @@ export function useDashboard() {
 export function useCategories() {
   return useQuery({
     queryKey: queryKeys.categories,
-    queryFn: () => apiFetch<{ id: string; name: string; emoji?: string }[]>('/api/categories'),
+    queryFn: () =>
+      apiFetch<{ id: string; name: string; emoji?: string; kind?: string }[]>(
+        '/api/categories',
+      ),
   })
 }
 
@@ -747,10 +750,11 @@ export function useUpdateReminder() {
       ...payload
     }: {
       id: string
-      message: string
-      timeUtc: string
+      message?: string | null
+      timeUtc?: string | null
       audience: ReminderAudience
       isEnabled: boolean
+      thresholdPercent?: number | null
     }) =>
       apiFetch<Reminder>(`/api/reminders/${id}`, {
         method: 'PUT',

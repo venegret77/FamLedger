@@ -45,6 +45,7 @@ public class BudgetController(
         return Ok(new
         {
             summary.Income,
+            summary.TopUps,
             summary.PlannedExpenses,
             summary.Spent,
             summary.Carryover,
@@ -62,7 +63,13 @@ public class BudgetController(
         });
     }
 
-    public record AddTransactionRequest(decimal Amount, string Currency, Guid? CategoryId, string? Note, DateOnly? Date);
+    public record AddTransactionRequest(
+        decimal Amount,
+        string Currency,
+        Guid? CategoryId,
+        string? Note,
+        DateOnly? Date,
+        string? Kind);
 
     [HttpGet("transactions")]
     public async Task<IActionResult> Transactions(CancellationToken ct)
@@ -75,8 +82,10 @@ public class BudgetController(
             t.Amount,
             t.Currency,
             t.BaseAmount,
+            Kind = t.Kind.ToString(),
             t.Date,
             t.Note,
+            categoryId = t.CategoryId,
             categoryName = t.Category?.Name,
             createdByName = t.CreatedByUser.DisplayName ?? t.CreatedByUser.FirstName,
             t.CreatedAt
@@ -87,8 +96,22 @@ public class BudgetController(
     public async Task<IActionResult> AddTransaction([FromBody] AddTransactionRequest request, CancellationToken ct)
     {
         var (context, _) = await GetActiveContextAsync(ct);
-        var tx = await expenseService.AddAsync(context.Id, User.GetUserId(), request.Amount, request.Currency, request.CategoryId, request.Note, request.Date, ct);
-        return Ok(new { tx.Id });
+        var kind = Domain.Enums.TransactionKind.Expense;
+        if (!string.IsNullOrWhiteSpace(request.Kind)
+            && !Enum.TryParse(request.Kind, ignoreCase: true, out kind))
+            return BadRequest(new { message = "Invalid kind" });
+
+        var tx = await expenseService.AddAsync(
+            context.Id,
+            User.GetUserId(),
+            request.Amount,
+            request.Currency,
+            request.CategoryId,
+            request.Note,
+            request.Date,
+            kind,
+            ct);
+        return Ok(new { tx.Id, Kind = tx.Kind.ToString() });
     }
 
     [HttpDelete("transactions/{id:guid}")]

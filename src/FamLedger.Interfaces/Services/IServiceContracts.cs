@@ -24,7 +24,16 @@ public interface IExchangeRateService
 
 public interface IExpenseService
 {
-    Task<Transaction> AddAsync(Guid contextId, Guid userId, decimal amount, string currency, Guid? categoryId, string? note, DateOnly? date, CancellationToken ct = default);
+    Task<Transaction> AddAsync(
+        Guid contextId,
+        Guid userId,
+        decimal amount,
+        string currency,
+        Guid? categoryId,
+        string? note,
+        DateOnly? date,
+        Domain.Enums.TransactionKind kind = Domain.Enums.TransactionKind.Expense,
+        CancellationToken ct = default);
     Task<IReadOnlyList<Transaction>> GetByPeriodAsync(Guid periodId, CancellationToken ct = default);
     Task DeleteAsync(Guid transactionId, Guid userId, CancellationToken ct = default);
 }
@@ -151,24 +160,29 @@ public interface IDialogStateService
 public interface IReminderService
 {
     Task<IReadOnlyList<Reminder>> ListVisibleAsync(Guid contextId, Guid userId, CancellationToken ct = default);
+    Task EnsureDefaultsAsync(Guid contextId, Guid userId, bool isPersonalContext, CancellationToken ct = default);
     Task<Reminder> CreateAsync(
         Guid contextId,
         Guid userId,
-        string message,
-        TimeOnly timeUtc,
+        string? message,
+        TimeOnly? timeUtc,
         Domain.Enums.ReminderAudience audience,
+        Domain.Enums.ReminderKind kind,
+        int? thresholdPercent,
         bool isPersonalContext,
         CancellationToken ct = default);
     Task<Reminder> UpdateAsync(
         Guid id,
         Guid userId,
-        string message,
-        TimeOnly timeUtc,
+        string? message,
+        TimeOnly? timeUtc,
         Domain.Enums.ReminderAudience audience,
         bool isEnabled,
+        int? thresholdPercent,
         bool isPersonalContext,
         CancellationToken ct = default);
     Task DeleteAsync(Guid id, Guid userId, CancellationToken ct = default);
-    Task<IReadOnlyList<Reminder>> GetDueAsync(TimeOnly timeUtc, DateOnly todayUtc, CancellationToken ct = default);
+    Task<IReadOnlyList<Reminder>> GetDueTimedAsync(TimeOnly timeUtc, DateOnly todayUtc, CancellationToken ct = default);
+    Task<IReadOnlyList<Reminder>> GetEnabledBudgetAlertsAsync(CancellationToken ct = default);
     Task MarkFiredAsync(Guid id, DateOnly todayUtc, CancellationToken ct = default);
 }

@@ -40,10 +40,14 @@ public static partial class MoneyInputParser
             ["баксов"] = CurrencyCode.Usd,
         };
 
-    public static bool TryParse(string? text, out ParsedMoneyInput result)
+    public static bool TryParse(string? text, out ParsedMoneyInput result, string? defaultCurrency = null)
     {
         result = default;
         if (string.IsNullOrWhiteSpace(text)) return false;
+
+        var fallback = string.IsNullOrWhiteSpace(defaultCurrency)
+            ? CurrencyCode.Rsd
+            : defaultCurrency.Trim().ToUpperInvariant();
 
         var raw = text.Trim().Replace('\u00A0', ' ');
 
@@ -54,6 +58,7 @@ public static partial class MoneyInputParser
                 symbolPrefix.Groups["amount"].Value,
                 symbolPrefix.Groups["symbol"].Value,
                 Remainder(symbolPrefix),
+                fallback,
                 out result);
 
         // 10$ / 12,5€ [комментарий]
@@ -63,22 +68,23 @@ public static partial class MoneyInputParser
                 symbolSuffix.Groups["amount"].Value,
                 symbolSuffix.Groups["symbol"].Value,
                 Remainder(symbolSuffix),
+                fallback,
                 out result);
 
         // 10usd / 10.5eur / 12,5RSD
         var glued = GluedCurrencyRegex().Match(raw);
         if (glued.Success && TryResolveCurrency(glued.Groups["code"].Value, out var gluedCurrency))
-            return Finish(glued.Groups["amount"].Value, gluedCurrency, Remainder(glued), out result);
+            return Finish(glued.Groups["amount"].Value, gluedCurrency, Remainder(glued), fallback, out result);
 
         // usd 10 | 10.5 usd | 10,6 евро
         var spaced = SpacedCurrencyRegex().Match(raw);
         if (spaced.Success && TryResolveCurrency(spaced.Groups["code"].Value, out var spacedCurrency))
-            return Finish(spaced.Groups["amount"].Value, spacedCurrency, Remainder(spaced), out result);
+            return Finish(spaced.Groups["amount"].Value, spacedCurrency, Remainder(spaced), fallback, out result);
 
-        // просто число → RSD
+        // просто число → валюта по умолчанию
         var plain = PlainAmountRegex().Match(raw);
         if (plain.Success)
-            return Finish(plain.Groups["amount"].Value, CurrencyCode.Rsd, Remainder(plain), out result);
+            return Finish(plain.Groups["amount"].Value, fallback, Remainder(plain), fallback, out result);
 
         return false;
     }
@@ -93,6 +99,7 @@ public static partial class MoneyInputParser
         string amountText,
         string currencyOrToken,
         string? remainder,
+        string fallbackCurrency,
         out ParsedMoneyInput result)
     {
         result = default;
@@ -102,7 +109,7 @@ public static partial class MoneyInputParser
             return false;
 
         if (!TryResolveCurrency(currencyOrToken, out var currency))
-            currency = CurrencyCode.Rsd;
+            currency = fallbackCurrency;
 
         result = new ParsedMoneyInput(amount, currency, remainder);
         return true;

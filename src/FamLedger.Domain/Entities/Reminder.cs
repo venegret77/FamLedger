@@ -7,8 +7,10 @@ public class Reminder
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid ContextId { get; set; }
     public Guid CreatedByUserId { get; set; }
-    public string Message { get; set; } = string.Empty;
-    public TimeOnly TimeUtc { get; set; }
+    public ReminderKind Kind { get; set; } = ReminderKind.Custom;
+    public string? Message { get; set; }
+    public TimeOnly? TimeUtc { get; set; }
+    public int? ThresholdPercent { get; set; }
     public ReminderAudience Audience { get; set; } = ReminderAudience.Self;
     public bool IsEnabled { get; set; } = true;
     public DateOnly? LastFiredDateUtc { get; set; }

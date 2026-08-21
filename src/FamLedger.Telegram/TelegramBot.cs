@@ -42,20 +42,25 @@ public class TelegramBot(
     private async Task HandleUpdateCoreAsync(ITelegramBotClient client, Update update, CancellationToken ct)
     {
         using var scope = scopeFactory.CreateScope();
-        var userService = scope.ServiceProvider.GetRequiredService<IUserService>();
-        var expenseService = scope.ServiceProvider.GetRequiredService<IExpenseService>();
-        var categoryService = scope.ServiceProvider.GetRequiredService<ICategoryService>();
-        var contextService = scope.ServiceProvider.GetRequiredService<IContextService>();
-        var dialogState = scope.ServiceProvider.GetRequiredService<IDialogStateService>();
-        var loginTokenService = scope.ServiceProvider.GetRequiredService<ILoginTokenService>();
+        var sp = scope.ServiceProvider;
+        var userService = sp.GetRequiredService<IUserService>();
+        var expenseService = sp.GetRequiredService<IExpenseService>();
+        var categoryService = sp.GetRequiredService<ICategoryService>();
+        var contextService = sp.GetRequiredService<IContextService>();
+        var dialogState = sp.GetRequiredService<IDialogStateService>();
+        var loginTokenService = sp.GetRequiredService<ILoginTokenService>();
+        var calculator = sp.GetRequiredService<IBudgetCalculatorService>();
+        var periodService = sp.GetRequiredService<IBudgetPeriodService>();
+        var debtService = sp.GetRequiredService<IDebtService>();
 
         if (update.Message is { Text: not null } msg)
         {
             var chatId = msg.Chat.Id;
             var telegramUserId = msg.From?.Id ?? chatId;
             var user = await userService.GetOrCreateByTelegramAsync(telegramUserId, msg.From?.Username, msg.From?.FirstName, ct);
+            var (command, payload) = ParseCommand(msg.Text);
 
-            if (ParseCommand(msg.Text) is ("/start", var payload))
+            if (command is "/start")
             {
                 if (payload.StartsWith("login", StringComparison.OrdinalIgnoreCase))
                 {
@@ -69,97 +74,390 @@ public class TelegramBot(
                     return;
                 }
 
+                var spendContext = await ResolveSpendContextAsync(contextService, user.Id, user.ActiveContextId, ct);
+                var baseCur = spendContext?.BaseCurrency ?? "RSD";
                 await client.SendMessage(chatId,
                     $"Привет, {user.DisplayName ?? user.FirstName}!\n\n" +
-                    "Отправь сумму расхода, например:\n" +
-                    "• 1000\n" +
-                    "• 10.5 usd / 10,6 eur\n" +
-                    "• 15eur / €15.5\n" +
-                    "• $20 кофе\n\n" +
-                    "Без валюты считается в динарах (RSD).\n\n" +
-                    "Для входа на сайт: /start login",
+                    "Списание — просто отправь сумму:\n" +
+                    "• 1000 кофе\n" +
+                    "• 10 eur хостинг\n" +
+                    "• 10.5 usd / €15.5 / $20\n\n" +
+                    $"Без валюты — {baseCur}.\n\n" +
+                    "Команды:\n" +
+                    "• /пополнить 500 премия — пополнение\n" +
+                    "• /статистика — баланс периода\n" +
+                    "• /долг 1000 Ивану — записать в долг\n" +
+                    "• /start login — код для сайта",
                     cancellationToken: ct);
                 return;
             }
 
-            if (MoneyInputParser.TryParse(msg.Text, out var parsed))
+            if (command is "/статистика" or "/stats")
             {
-                var spendContext = await ResolveSpendContextAsync(contextService, user.Id, user.ActiveContextId, ct);
-                if (spendContext is null)
+                await HandleStatsAsync(client, chatId, user, contextService, periodService, calculator, ct);
+                return;
+            }
+
+            if (command is "/пополнить" or "/topup")
+            {
+                var topUpContext = await ResolveSpendContextAsync(contextService, user.Id, user.ActiveContextId, ct);
+                if (topUpContext is null)
                 {
                     await client.SendMessage(chatId, "Сначала войди на сайт и выбери бюджет.", cancellationToken: ct);
                     return;
                 }
 
-                var state = new DialogState
+                if (!MoneyInputParser.TryParse(payload, out var topUpParsed, topUpContext.BaseCurrency))
                 {
-                    Step = "pick_category",
-                    PendingAmount = parsed.Amount,
-                    PendingCurrency = parsed.Currency,
-                    PendingNote = parsed.Remainder,
-                    PendingContextId = spendContext.Id
+                    await client.SendMessage(chatId,
+                        "Пример: /пополнить 1000 премия или /пополнить 50 eur кэшбек",
+                        cancellationToken: ct);
+                    return;
+                }
+
+                await BeginMoneyFlowAsync(
+                    client, chatId, user, topUpParsed, "income", topUpContext,
+                    categoryService, dialogState, ct);
+                return;
+            }
+
+            if (command is "/долг" or "/debt")
+            {
+                var debtContext = await ResolveSpendContextAsync(contextService, user.Id, user.ActiveContextId, ct);
+                if (debtContext is null)
+                {
+                    await client.SendMessage(chatId, "Сначала войди на сайт и выбери бюджет.", cancellationToken: ct);
+                    return;
+                }
+
+                if (!MoneyInputParser.TryParse(payload, out var debtParsed, debtContext.BaseCurrency))
+                {
+                    await client.SendMessage(chatId,
+                        "Пример: /долг 1000 обед или /долг 20 eur такси",
+                        cancellationToken: ct);
+                    return;
+                }
+
+                await BeginDebtFlowAsync(
+                    client, chatId, user, debtParsed, debtContext,
+                    debtService, dialogState, ct);
+                return;
+            }
+
+            // waiting for new debt name?
+            var existing = await dialogState.GetAsync(chatId, ct);
+            if (existing?.Step == "debt_name" && existing.PendingAmount is not null)
+            {
+                var name = msg.Text.Trim();
+                if (name.Length == 0)
+                {
+                    await client.SendMessage(chatId, "Введи имя человека или название.", cancellationToken: ct);
+                    return;
+                }
+
+                existing.PendingDebtName = name;
+                existing.Step = "debt_direction";
+                await dialogState.SetAsync(chatId, existing, TimeSpan.FromHours(1), ct);
+
+                var rows = new[]
+                {
+                    new[]
+                    {
+                        InlineKeyboardButton.WithCallbackData("Мне должны", "debt_dir:they"),
+                        InlineKeyboardButton.WithCallbackData("Я должен", "debt_dir:we"),
+                    }
                 };
-                await dialogState.SetAsync(chatId, state, TimeSpan.FromHours(1), ct);
-
-                await categoryService.SeedDefaultsAsync(spendContext.Id, ct);
-                var categories = (await categoryService.GetByContextAsync(spendContext.Id, ct))
-                    .Where(c => c.Kind == CategoryKind.Expense)
-                    .OrderBy(c => c.SortOrder)
-                    .Take(8)
-                    .ToList();
-
-                var rows = categories
-                    .Select(c => InlineKeyboardButton.WithCallbackData(c.Name, $"cat:{c.Id}"))
-                    .Chunk(2)
-                    .Select(row => row.ToArray())
-                    .ToList();
-                rows.Add([InlineKeyboardButton.WithCallbackData("Без категории", "cat:none")]);
-
                 await client.SendMessage(chatId,
-                    $"Записать {MoneyFormatter.Format(parsed.Amount, parsed.Currency)} в «{spendContext.Name}» — выбери категорию:",
+                    $"«{name}» — кто кому должен?",
                     replyMarkup: new InlineKeyboardMarkup(rows),
                     cancellationToken: ct);
                 return;
             }
 
+            if (command.StartsWith('/'))
+            {
+                await client.SendMessage(chatId,
+                    "Неизвестная команда. /start — справка.",
+                    cancellationToken: ct);
+                return;
+            }
+
+            var spendCtx = await ResolveSpendContextAsync(contextService, user.Id, user.ActiveContextId, ct);
+            if (spendCtx is null)
+            {
+                await client.SendMessage(chatId, "Сначала войди на сайт и выбери бюджет.", cancellationToken: ct);
+                return;
+            }
+
+            if (MoneyInputParser.TryParse(msg.Text, out var parsed, spendCtx.BaseCurrency))
+            {
+                await BeginMoneyFlowAsync(
+                    client, chatId, user, parsed, "expense", spendCtx,
+                    categoryService, dialogState, ct);
+                return;
+            }
+
             await client.SendMessage(chatId,
-                "Отправь сумму, например: 1000, 10.5 usd, 10,6 eur, $20 кофе — или /start",
+                "Отправь сумму (1000 кофе, 10 eur хостинг) или /start",
                 cancellationToken: ct);
+            return;
         }
 
         if (update.CallbackQuery is { Data: not null } cb)
         {
             var chatId = cb.Message!.Chat.Id;
+            var telegramUserId = cb.From.Id;
+            var user = await userService.GetOrCreateByTelegramAsync(
+                telegramUserId, cb.From.Username, cb.From.FirstName, ct);
+
             if (cb.Data.StartsWith("cat:"))
             {
-                var payload = cb.Data["cat:".Length..];
-                Guid? categoryId = payload == "none" ? null : Guid.Parse(payload);
-                var state = await dialogState.GetAsync(chatId, ct);
-                if (state?.PendingAmount is null || state.PendingContextId is null)
-                {
-                    await client.AnswerCallbackQuery(cb.Id, "Сессия истекла", cancellationToken: ct);
-                    return;
-                }
+                await HandleCategoryCallbackAsync(client, cb, chatId, user, dialogState, expenseService, ct);
+                return;
+            }
 
-                var telegramUserId = cb.From.Id;
-                var user = await userService.GetOrCreateByTelegramAsync(
-                    telegramUserId, cb.From.Username, cb.From.FirstName, ct);
-                await expenseService.AddAsync(
-                    state.PendingContextId.Value,
-                    user.Id,
-                    state.PendingAmount.Value,
-                    state.PendingCurrency ?? "RSD",
-                    categoryId,
-                    state.PendingNote,
-                    null,
-                    ct);
-                await dialogState.ClearAsync(chatId, ct);
-                await client.AnswerCallbackQuery(cb.Id, "Записано!", cancellationToken: ct);
-                await client.SendMessage(chatId,
-                    $"✅ Расход {MoneyFormatter.Format(state.PendingAmount.Value, state.PendingCurrency ?? "RSD")} записан",
-                    cancellationToken: ct);
+            if (cb.Data.StartsWith("debt_pick:"))
+            {
+                await HandleDebtPickCallbackAsync(client, cb, chatId, user, dialogState, debtService, ct);
+                return;
+            }
+
+            if (cb.Data.StartsWith("debt_dir:"))
+            {
+                await HandleDebtDirectionCallbackAsync(client, cb, chatId, user, dialogState, debtService, ct);
             }
         }
+    }
+
+    private static async Task HandleStatsAsync(
+        ITelegramBotClient client,
+        long chatId,
+        Domain.Entities.User user,
+        IContextService contextService,
+        IBudgetPeriodService periodService,
+        IBudgetCalculatorService calculator,
+        CancellationToken ct)
+    {
+        var spendContext = await ResolveSpendContextAsync(contextService, user.Id, user.ActiveContextId, ct);
+        if (spendContext is null)
+        {
+            await client.SendMessage(chatId, "Сначала войди на сайт и выбери бюджет.", cancellationToken: ct);
+            return;
+        }
+
+        var period = await periodService.EnsureActivePeriodAsync(spendContext, ct);
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var summary = await calculator.CalculateAsync(spendContext, period, today, ct);
+        await client.SendMessage(chatId,
+            BudgetSummaryFormatter.FormatStats(summary, spendContext.BaseCurrency, spendContext.Name),
+            cancellationToken: ct);
+    }
+
+    private static async Task BeginMoneyFlowAsync(
+        ITelegramBotClient client,
+        long chatId,
+        Domain.Entities.User user,
+        ParsedMoneyInput parsed,
+        string intent,
+        Domain.Entities.BudgetContext spendContext,
+        ICategoryService categoryService,
+        IDialogStateService dialogState,
+        CancellationToken ct)
+    {
+        var currency = parsed.Currency;
+        var state = new DialogState
+        {
+            Step = "pick_category",
+            Intent = intent,
+            PendingAmount = parsed.Amount,
+            PendingCurrency = currency,
+            PendingNote = parsed.Remainder,
+            PendingContextId = spendContext.Id
+        };
+        await dialogState.SetAsync(chatId, state, TimeSpan.FromHours(1), ct);
+
+        await categoryService.SeedDefaultsAsync(spendContext.Id, ct);
+        var kind = intent == "income" ? CategoryKind.Income : CategoryKind.Expense;
+        var categories = (await categoryService.GetByContextAsync(spendContext.Id, ct))
+            .Where(c => c.Kind == kind)
+            .OrderBy(c => c.SortOrder)
+            .Take(8)
+            .ToList();
+
+        var rows = categories
+            .Select(c => InlineKeyboardButton.WithCallbackData(c.Name, $"cat:{c.Id}"))
+            .Chunk(2)
+            .Select(row => row.ToArray())
+            .ToList();
+        rows.Add([InlineKeyboardButton.WithCallbackData("Без категории", "cat:none")]);
+
+        var label = intent == "income" ? "Пополнение" : "Списание";
+        await client.SendMessage(chatId,
+            $"{label} {MoneyFormatter.Format(parsed.Amount, currency)} в «{spendContext.Name}» — выбери категорию:",
+            replyMarkup: new InlineKeyboardMarkup(rows),
+            cancellationToken: ct);
+    }
+
+    private static async Task BeginDebtFlowAsync(
+        ITelegramBotClient client,
+        long chatId,
+        Domain.Entities.User user,
+        ParsedMoneyInput parsed,
+        Domain.Entities.BudgetContext spendContext,
+        IDebtService debtService,
+        IDialogStateService dialogState,
+        CancellationToken ct)
+    {
+        var currency = parsed.Currency;
+        var state = new DialogState
+        {
+            Step = "pick_debt",
+            Intent = "debt",
+            PendingAmount = parsed.Amount,
+            PendingCurrency = currency,
+            PendingNote = parsed.Remainder,
+            PendingContextId = spendContext.Id
+        };
+        await dialogState.SetAsync(chatId, state, TimeSpan.FromHours(1), ct);
+
+        var debts = await debtService.GetByContextAsync(spendContext.Id, hidePaid: false, ct);
+        var rows = debts
+            .Take(10)
+            .Select(d =>
+            {
+                var dir = d.Direction == DebtDirection.TheyOwe ? "нам" : "мы";
+                return InlineKeyboardButton.WithCallbackData(
+                    $"{d.CounterpartyName} ({dir})",
+                    $"debt_pick:{d.Id}");
+            })
+            .Chunk(1)
+            .Select(row => row.ToArray())
+            .ToList();
+        rows.Add([InlineKeyboardButton.WithCallbackData("➕ Новый должник", "debt_pick:new")]);
+
+        await client.SendMessage(chatId,
+            $"Долг {MoneyFormatter.Format(parsed.Amount, currency)} — выбери кого:",
+            replyMarkup: new InlineKeyboardMarkup(rows),
+            cancellationToken: ct);
+    }
+
+    private static async Task HandleCategoryCallbackAsync(
+        ITelegramBotClient client,
+        CallbackQuery cb,
+        long chatId,
+        Domain.Entities.User user,
+        IDialogStateService dialogState,
+        IExpenseService expenseService,
+        CancellationToken ct)
+    {
+        var payload = cb.Data!["cat:".Length..];
+        Guid? categoryId = payload == "none" ? null : Guid.Parse(payload);
+        var state = await dialogState.GetAsync(chatId, ct);
+        if (state?.PendingAmount is null || state.PendingContextId is null)
+        {
+            await client.AnswerCallbackQuery(cb.Id, "Сессия истекла", cancellationToken: ct);
+            return;
+        }
+
+        var kind = state.Intent == "income" ? TransactionKind.Income : TransactionKind.Expense;
+        var currency = state.PendingCurrency ?? "RSD";
+        await expenseService.AddAsync(
+            state.PendingContextId.Value,
+            user.Id,
+            state.PendingAmount.Value,
+            currency,
+            categoryId,
+            state.PendingNote,
+            null,
+            kind,
+            ct);
+        await dialogState.ClearAsync(chatId, ct);
+        await client.AnswerCallbackQuery(cb.Id, "Записано!", cancellationToken: ct);
+        var label = kind == TransactionKind.Income ? "Пополнение" : "Расход";
+        await client.SendMessage(chatId,
+            $"✅ {label} {MoneyFormatter.Format(state.PendingAmount.Value, currency)} записано",
+            cancellationToken: ct);
+    }
+
+    private static async Task HandleDebtPickCallbackAsync(
+        ITelegramBotClient client,
+        CallbackQuery cb,
+        long chatId,
+        Domain.Entities.User user,
+        IDialogStateService dialogState,
+        IDebtService debtService,
+        CancellationToken ct)
+    {
+        var payload = cb.Data!["debt_pick:".Length..];
+        var state = await dialogState.GetAsync(chatId, ct);
+        if (state?.PendingAmount is null || state.PendingContextId is null || state.Intent != "debt")
+        {
+            await client.AnswerCallbackQuery(cb.Id, "Сессия истекла", cancellationToken: ct);
+            return;
+        }
+
+        if (payload == "new")
+        {
+            state.Step = "debt_name";
+            await dialogState.SetAsync(chatId, state, TimeSpan.FromHours(1), ct);
+            await client.AnswerCallbackQuery(cb.Id, cancellationToken: ct);
+            await client.SendMessage(chatId, "Как зовут? Напиши имя:", cancellationToken: ct);
+            return;
+        }
+
+        var debtId = Guid.Parse(payload);
+        var currency = state.PendingCurrency ?? "RSD";
+        await debtService.AddEntryAsync(
+            debtId,
+            state.PendingAmount.Value,
+            currency,
+            state.PendingNote ?? string.Empty,
+            ct);
+        await dialogState.ClearAsync(chatId, ct);
+        await client.AnswerCallbackQuery(cb.Id, "Записано!", cancellationToken: ct);
+        await client.SendMessage(chatId,
+            $"✅ Долг {MoneyFormatter.Format(state.PendingAmount.Value, currency)} записан",
+            cancellationToken: ct);
+    }
+
+    private static async Task HandleDebtDirectionCallbackAsync(
+        ITelegramBotClient client,
+        CallbackQuery cb,
+        long chatId,
+        Domain.Entities.User user,
+        IDialogStateService dialogState,
+        IDebtService debtService,
+        CancellationToken ct)
+    {
+        var payload = cb.Data!["debt_dir:".Length..];
+        var state = await dialogState.GetAsync(chatId, ct);
+        if (state?.PendingAmount is null
+            || state.PendingContextId is null
+            || string.IsNullOrWhiteSpace(state.PendingDebtName))
+        {
+            await client.AnswerCallbackQuery(cb.Id, "Сессия истекла", cancellationToken: ct);
+            return;
+        }
+
+        var direction = payload == "they" ? DebtDirection.TheyOwe : DebtDirection.WeOwe;
+        var debt = await debtService.CreateAsync(
+            state.PendingContextId.Value,
+            state.PendingDebtName,
+            null,
+            direction,
+            ct);
+        var currency = state.PendingCurrency ?? "RSD";
+        await debtService.AddEntryAsync(
+            debt.Id,
+            state.PendingAmount.Value,
+            currency,
+            state.PendingNote ?? string.Empty,
+            ct);
+        await dialogState.ClearAsync(chatId, ct);
+        await client.AnswerCallbackQuery(cb.Id, "Записано!", cancellationToken: ct);
+        await client.SendMessage(chatId,
+            $"✅ Долг {MoneyFormatter.Format(state.PendingAmount.Value, currency)} на «{state.PendingDebtName}» записан",
+            cancellationToken: ct);
     }
 
     private static async Task<Domain.Entities.BudgetContext?> ResolveSpendContextAsync(
@@ -171,7 +469,6 @@ public class TelegramBot(
         var contexts = await contextService.GetUserContextsAsync(userId, ct);
         if (contexts.Count == 0) return null;
 
-        // Семейный бюджет приоритетнее личного — туда пишут расходы из бота.
         var family = contexts.FirstOrDefault(c => !c.IsPersonal);
         if (family is not null) return family;
 
@@ -197,6 +494,6 @@ public class TelegramBot(
         var at = command.IndexOf('@');
         if (at >= 0) command = command[..at];
         var payload = parts.Length > 1 ? parts[1].Trim() : string.Empty;
-        return (command, payload);
+        return (command.ToLowerInvariant(), payload);
     }
 }

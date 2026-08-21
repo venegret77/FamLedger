@@ -8,6 +8,7 @@ export type DebtDirection = 'OwedToUs' | 'WeOwe'
 
 export interface BudgetSummary {
   income: number
+  topUps: number
   plannedExpenses: number
   spent: number
   carryover: number
@@ -28,6 +29,7 @@ export interface Category {
   id: string
   name: string
   emoji?: string
+  kind?: 'Expense' | 'Income'
 }
 
 export interface Transaction {
@@ -35,6 +37,7 @@ export interface Transaction {
   amount: number
   baseAmount: number
   currency: string
+  kind?: 'Expense' | 'Income'
   date: string
   note?: string
   categoryId?: string
@@ -49,6 +52,7 @@ export interface CreateTransactionRequest {
   categoryId?: string
   note?: string
   date?: string
+  kind?: 'Expense' | 'Income'
 }
 
 export interface RecurringExpense {
@@ -202,13 +206,23 @@ export interface AppSettings {
 }
 
 export type ReminderAudience = 'Self' | 'Family'
+export type ReminderKind =
+  | 'Custom'
+  | 'DailyBalance'
+  | 'BudgetAlert'
+  | 'EveningCheckIn'
+  | 'PeriodEnding'
+  | 'UnpaidDebts'
 
 export interface Reminder {
   id: string
-  message: string
-  timeUtc: string
+  kind: ReminderKind
+  message?: string | null
+  timeUtc?: string | null
+  thresholdPercent?: number | null
   audience: ReminderAudience
   isEnabled: boolean
+  isStandard?: boolean
   createdByUserId: string
   createdByName?: string
   canEdit: boolean

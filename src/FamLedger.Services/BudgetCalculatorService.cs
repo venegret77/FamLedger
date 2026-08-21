@@ -1,5 +1,6 @@
 using FamLedger.Common;
 using FamLedger.Domain.Entities;
+using FamLedger.Domain.Enums;
 using FamLedger.Domain.Models;
 using FamLedger.Interfaces.Services;
 using FamLedger.Repository;
@@ -37,15 +38,20 @@ public class BudgetCalculatorService(
             .SumAsync(x => x.BaseAmount, ct);
 
         var plannedExpenses = recurringTotal + oneOffTotal;
-        var spent = await db.Transactions.Where(t => t.PeriodId == period.Id).SumAsync(t => t.BaseAmount, ct);
+        var spent = await db.Transactions
+            .Where(t => t.PeriodId == period.Id && t.Kind == TransactionKind.Expense)
+            .SumAsync(t => t.BaseAmount, ct);
+        var topUps = await db.Transactions
+            .Where(t => t.PeriodId == period.Id && t.Kind == TransactionKind.Income)
+            .SumAsync(t => t.BaseAmount, ct);
         var spentToday = await db.Transactions
-            .Where(t => t.PeriodId == period.Id && t.Date == today)
+            .Where(t => t.PeriodId == period.Id && t.Kind == TransactionKind.Expense && t.Date == today)
             .SumAsync(t => t.BaseAmount, ct);
         var spentBeforeToday = spent - spentToday;
 
-        // Копилка не участвует. Остаток месяца = доходы − план − факт.
-        var remaining = incomeTotal - plannedExpenses - spent;
-        var envelope = incomeTotal - plannedExpenses;
+        // Копилка не участвует. Остаток = плановые доходы + пополнения − план − факт.
+        var remaining = incomeTotal + topUps - plannedExpenses - spent;
+        var envelope = incomeTotal + topUps - plannedExpenses;
         var dailyBudget = daysInPeriod > 0 ? envelope / daysInPeriod : 0m;
 
         // 15–20 включительно = 6 дней. Доступно сегодня: 6 × дневной − все расходы периода.
@@ -57,6 +63,7 @@ public class BudgetCalculatorService(
         {
             PeriodId = period.Id,
             Income = incomeTotal,
+            TopUps = topUps,
             PlannedExpenses = plannedExpenses,
             Spent = spent,
             Carryover = carryover,

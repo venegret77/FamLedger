@@ -29,7 +29,7 @@ services:
       App__MinioBucket: ${MINIO_BUCKET:-famledger}
       WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:5173}
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     networks:
       - famledger
 
@@ -71,7 +71,7 @@ services:
     depends_on:
       - api
     ports:
-      - "5173:80"
+      - "127.0.0.1:5173:80"
     networks:
       - famledger
 
@@ -84,7 +84,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     ports:
-      - "5435:5432"
+      - "127.0.0.1:5435:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -101,7 +101,7 @@ services:
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
     ports:
-      - "6382:6379"
+      - "127.0.0.1:6382:6379"
     volumes:
       - redis-data:/data
     healthcheck:
@@ -121,8 +121,8 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
     volumes:
       - minio-data:/data
     networks:

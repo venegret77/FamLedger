@@ -1,5 +1,8 @@
+using FamLedger.Common;
 using FamLedger.Domain.Enums;
 using FamLedger.Interfaces.Services;
+using FamLedger.Repository;
+using Microsoft.EntityFrameworkCore;
 
 namespace FamLedger.Bot.Workers;
 
@@ -33,28 +36,25 @@ public class ReminderWorker(IServiceScopeFactory scopeFactory, ILogger<ReminderW
         using var scope = scopeFactory.CreateScope();
         var reminders = scope.ServiceProvider.GetRequiredService<IReminderService>();
         var notifications = scope.ServiceProvider.GetRequiredService<INotificationService>();
+        var calculator = scope.ServiceProvider.GetRequiredService<IBudgetCalculatorService>();
+        var periodService = scope.ServiceProvider.GetRequiredService<IBudgetPeriodService>();
+        var debtService = scope.ServiceProvider.GetRequiredService<IDebtService>();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         var now = DateTime.UtcNow;
         var timeUtc = TimeOnly.FromDateTime(now);
         var todayUtc = DateOnly.FromDateTime(now);
 
-        var due = await reminders.GetDueAsync(timeUtc, todayUtc, ct);
-        foreach (var reminder in due)
+        var dueTimed = await reminders.GetDueTimedAsync(timeUtc, todayUtc, ct);
+        foreach (var reminder in dueTimed)
         {
             try
             {
-                if (reminder.Audience == ReminderAudience.Family)
-                {
-                    await notifications.NotifyContextMembersAsync(reminder.ContextId, reminder.Message, ct);
-                }
-                else
-                {
-                    await notifications.SendTelegramAsync(
-                        reminder.CreatedByUser.TelegramUserId,
-                        reminder.Message,
-                        ct);
-                }
+                var message = await BuildTimedMessageAsync(
+                    reminder, calculator, periodService, debtService, todayUtc, ct);
+                if (message is null) continue;
 
+                await SendAsync(notifications, reminder, message, ct);
                 await reminders.MarkFiredAsync(reminder.Id, todayUtc, ct);
             }
             catch (Exception ex)
@@ -62,5 +62,108 @@ public class ReminderWorker(IServiceScopeFactory scopeFactory, ILogger<ReminderW
                 logger.LogWarning(ex, "Failed to fire reminder {ReminderId}", reminder.Id);
             }
         }
+
+        var budgetAlerts = await reminders.GetEnabledBudgetAlertsAsync(ct);
+        foreach (var reminder in budgetAlerts)
+        {
+            try
+            {
+                if (reminder.LastFiredDateUtc == todayUtc) continue;
+
+                var context = reminder.Context
+                    ?? await db.BudgetContexts.FindAsync([reminder.ContextId], ct);
+                if (context is null) continue;
+
+                var period = await periodService.EnsureActivePeriodAsync(context, ct);
+                var summary = await calculator.CalculateAsync(context, period, todayUtc, ct);
+                var percent = BudgetSummaryFormatter.TryGetSpendPercent(summary);
+                var threshold = reminder.ThresholdPercent ?? 80;
+                if (percent is null || percent < threshold) continue;
+
+                var message = BudgetSummaryFormatter.FormatBudgetAlert(
+                    summary, context.BaseCurrency, percent.Value, threshold);
+                await SendAsync(notifications, reminder, message, ct);
+                await reminders.MarkFiredAsync(reminder.Id, todayUtc, ct);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to fire budget alert {ReminderId}", reminder.Id);
+            }
+        }
+    }
+
+    private static async Task<string?> BuildTimedMessageAsync(
+        Domain.Entities.Reminder reminder,
+        IBudgetCalculatorService calculator,
+        IBudgetPeriodService periodService,
+        IDebtService debtService,
+        DateOnly todayUtc,
+        CancellationToken ct)
+    {
+        switch (reminder.Kind)
+        {
+            case ReminderKind.Custom:
+                return string.IsNullOrWhiteSpace(reminder.Message) ? null : reminder.Message;
+
+            case ReminderKind.EveningCheckIn:
+                return string.IsNullOrWhiteSpace(reminder.Message)
+                    ? "Не забудь записать расходы за день ✍️"
+                    : reminder.Message;
+
+            case ReminderKind.DailyBalance:
+            {
+                var context = reminder.Context;
+                if (context is null) return null;
+                var period = await periodService.EnsureActivePeriodAsync(context, ct);
+                var summary = await calculator.CalculateAsync(context, period, todayUtc, ct);
+                return BudgetSummaryFormatter.FormatStats(summary, context.BaseCurrency, context.Name);
+            }
+
+            case ReminderKind.PeriodEnding:
+            {
+                var context = reminder.Context;
+                if (context is null) return null;
+                var period = await periodService.EnsureActivePeriodAsync(context, ct);
+                var summary = await calculator.CalculateAsync(context, period, todayUtc, ct);
+                if (summary.DaysRemaining > 3) return null;
+                return $"⏳ До конца периода «{summary.PeriodLabel}» осталось {summary.DaysRemaining} дн.\n" +
+                       $"Остаток: {MoneyFormatter.Format(summary.Remaining, context.BaseCurrency)}";
+            }
+
+            case ReminderKind.UnpaidDebts:
+            {
+                if (reminder.LastFiredDateUtc is { } last
+                    && todayUtc.DayNumber - last.DayNumber < 7)
+                    return null;
+
+                var debts = await debtService.GetByContextAsync(reminder.ContextId, hidePaid: true, ct);
+                if (debts.Count == 0) return null;
+
+                var lines = debts.Select(d =>
+                {
+                    var open = d.Entries.Where(e => !e.IsPaid).ToList();
+                    var bal = open.Sum(e => e.Amount);
+                    var cur = open.FirstOrDefault()?.Currency ?? "RSD";
+                    var dir = d.Direction == DebtDirection.TheyOwe ? "нам должны" : "мы должны";
+                    return $"• {d.CounterpartyName}: {MoneyFormatter.Format(bal, cur)} ({dir})";
+                });
+                return "💳 Незакрытые долги:\n" + string.Join("\n", lines);
+            }
+
+            default:
+                return null;
+        }
+    }
+
+    private static async Task SendAsync(
+        INotificationService notifications,
+        Domain.Entities.Reminder reminder,
+        string message,
+        CancellationToken ct)
+    {
+        if (reminder.Audience == ReminderAudience.Family)
+            await notifications.NotifyContextMembersAsync(reminder.ContextId, message, ct);
+        else
+            await notifications.SendTelegramAsync(reminder.CreatedByUser.TelegramUserId, message, ct);
     }
 }
