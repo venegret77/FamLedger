@@ -30,7 +30,8 @@ const STANDARD_META: Record<
   },
   BudgetAlert: {
     title: 'Лимит бюджета',
-    description: 'Когда потрачено от порога (например 80%) или вышли за рамки.',
+    description:
+      'При добавлении расхода — если «Доступно сегодня» упало до порога от дневного бюджета или ушло в минус. В Telegram — сообщение, на сайте — всплывашка.',
     needsTime: false,
     needsThreshold: true,
   },

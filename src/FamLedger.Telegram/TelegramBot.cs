@@ -52,6 +52,7 @@ public class TelegramBot(
         var calculator = sp.GetRequiredService<IBudgetCalculatorService>();
         var periodService = sp.GetRequiredService<IBudgetPeriodService>();
         var debtService = sp.GetRequiredService<IDebtService>();
+        var budgetAlertService = sp.GetRequiredService<IBudgetAlertService>();
 
         if (update.Message is { Text: not null } msg)
         {
@@ -205,7 +206,8 @@ public class TelegramBot(
 
             if (cb.Data.StartsWith("cat:"))
             {
-                await HandleCategoryCallbackAsync(client, cb, chatId, user, dialogState, expenseService, ct);
+                await HandleCategoryCallbackAsync(
+                    client, cb, chatId, user, dialogState, expenseService, budgetAlertService, ct);
                 return;
             }
 
@@ -379,6 +381,7 @@ public class TelegramBot(
         Domain.Entities.User user,
         IDialogStateService dialogState,
         IExpenseService expenseService,
+        IBudgetAlertService budgetAlertService,
         CancellationToken ct)
     {
         var payload = cb.Data!["cat:".Length..];
@@ -392,8 +395,9 @@ public class TelegramBot(
 
         var kind = state.Intent == "income" ? TransactionKind.Income : TransactionKind.Expense;
         var currency = state.PendingCurrency ?? "RSD";
+        var contextId = state.PendingContextId.Value;
         await expenseService.AddAsync(
-            state.PendingContextId.Value,
+            contextId,
             user.Id,
             state.PendingAmount.Value,
             currency,
@@ -408,6 +412,12 @@ public class TelegramBot(
         await client.SendMessage(chatId,
             $"✅ {label} {MoneyFormatter.Format(state.PendingAmount.Value, currency)} записано",
             cancellationToken: ct);
+
+        if (kind == TransactionKind.Expense)
+        {
+            await budgetAlertService.EvaluateAfterExpenseAsync(
+                contextId, user.Id, notifyViaTelegram: true, ct);
+        }
     }
 
     private static async Task HandleDebtPickCallbackAsync(

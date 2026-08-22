@@ -11,6 +11,7 @@ import { Input, Select } from '../components/ui/Input'
 import { EmptyState, PageHeader, Spinner, Tabs } from '../components/ui/Tabs'
 import { StatCard } from '../components/ui/MoneyDisplay'
 import { MobileMoreMenu } from '../components/layout/Navigation'
+import { useToast } from '../components/ui/Toast'
 import { formatMoney } from '../lib/format'
 import { currencyOptions } from '../api/types'
 import type { FormEvent } from 'react'
@@ -18,6 +19,7 @@ import type { FormEvent } from 'react'
 type TxMode = 'Expense' | 'Income'
 
 export function DashboardPage() {
+  const { showToast } = useToast()
   const { data: summary, isLoading, isError, refetch } = useDashboard()
   const { data: categories } = useCategories()
   const { data: transactions } = useTransactions()
@@ -58,13 +60,20 @@ export function DashboardPage() {
     const parsed = Number.parseFloat(amount.replace(',', '.'))
     if (Number.isNaN(parsed) || parsed <= 0) return
 
-    await createTransaction.mutateAsync({
+    const result = await createTransaction.mutateAsync({
       amount: parsed,
       currency: selectedCurrency,
       categoryId: categoryId || undefined,
       note: note.trim() || undefined,
       kind: mode,
     })
+
+    if (result.budgetAlert) {
+      const lines = result.budgetAlert.message.split('\n')
+      const title = lines[0] ?? 'Лимит бюджета'
+      const message = lines.slice(1).join('\n') || undefined
+      showToast({ title, message, tone: 'warning' })
+    }
 
     setAmount('')
     setNote('')

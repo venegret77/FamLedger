@@ -62,34 +62,6 @@ public class ReminderWorker(IServiceScopeFactory scopeFactory, ILogger<ReminderW
                 logger.LogWarning(ex, "Failed to fire reminder {ReminderId}", reminder.Id);
             }
         }
-
-        var budgetAlerts = await reminders.GetEnabledBudgetAlertsAsync(ct);
-        foreach (var reminder in budgetAlerts)
-        {
-            try
-            {
-                if (reminder.LastFiredDateUtc == todayUtc) continue;
-
-                var context = reminder.Context
-                    ?? await db.BudgetContexts.FindAsync([reminder.ContextId], ct);
-                if (context is null) continue;
-
-                var period = await periodService.EnsureActivePeriodAsync(context, ct);
-                var summary = await calculator.CalculateAsync(context, period, todayUtc, ct);
-                var percent = BudgetSummaryFormatter.TryGetSpendPercent(summary);
-                var threshold = reminder.ThresholdPercent ?? 80;
-                if (percent is null || percent < threshold) continue;
-
-                var message = BudgetSummaryFormatter.FormatBudgetAlert(
-                    summary, context.BaseCurrency, percent.Value, threshold);
-                await SendAsync(notifications, reminder, message, ct);
-                await reminders.MarkFiredAsync(reminder.Id, todayUtc, ct);
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "Failed to fire budget alert {ReminderId}", reminder.Id);
-            }
-        }
     }
 
     private static async Task<string?> BuildTimedMessageAsync(

@@ -55,6 +55,19 @@ export interface CreateTransactionRequest {
   kind?: 'Expense' | 'Income'
 }
 
+export interface BudgetAlertPayload {
+  message: string
+  percentUsed: number
+  thresholdPercent: number
+  overBudget: boolean
+}
+
+export interface CreateTransactionResponse {
+  id: string
+  kind: string
+  budgetAlert?: BudgetAlertPayload | null
+}
+
 export interface RecurringExpense {
   id: string
   recurringExpenseId?: string

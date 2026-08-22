@@ -5,6 +5,7 @@ import type {
   BudgetContextInfo,
   BudgetSummary,
   CreateTransactionRequest,
+  CreateTransactionResponse,
   Debt,
   FamilyInfo,
   FamilyMemberRole,
@@ -74,7 +75,7 @@ export function useCreateTransaction() {
 
   return useMutation({
     mutationFn: (payload: CreateTransactionRequest) =>
-      apiFetch<Transaction>('/api/transactions', {
+      apiFetch<CreateTransactionResponse>('/api/transactions', {
         method: 'POST',
         body: payload,
       }),

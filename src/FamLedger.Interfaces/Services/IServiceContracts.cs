@@ -184,6 +184,24 @@ public interface IReminderService
         CancellationToken ct = default);
     Task DeleteAsync(Guid id, Guid userId, CancellationToken ct = default);
     Task<IReadOnlyList<Reminder>> GetDueTimedAsync(TimeOnly timeUtc, DateOnly todayUtc, CancellationToken ct = default);
-    Task<IReadOnlyList<Reminder>> GetEnabledBudgetAlertsAsync(CancellationToken ct = default);
+    Task<IReadOnlyList<Reminder>> GetEnabledBudgetAlertsAsync(Guid contextId, CancellationToken ct = default);
     Task MarkFiredAsync(Guid id, DateOnly todayUtc, CancellationToken ct = default);
+}
+
+public record BudgetAlertInfo(
+    string Message,
+    int PercentUsed,
+    int ThresholdPercent,
+    bool OverBudget);
+
+public interface IBudgetAlertService
+{
+    /// <summary>
+    /// Проверка после записи расхода. При notifyViaTelegram — шлёт в Telegram (не чаще раза в сутки на reminder).
+    /// </summary>
+    Task<BudgetAlertInfo?> EvaluateAfterExpenseAsync(
+        Guid contextId,
+        Guid actingUserId,
+        bool notifyViaTelegram,
+        CancellationToken ct = default);
 }

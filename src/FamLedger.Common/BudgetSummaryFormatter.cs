@@ -25,25 +25,51 @@ public static class BudgetSummaryFormatter
 
     public static string FormatBudgetAlert(BudgetSummary summary, string currency, int percentUsed, int threshold)
     {
-        var envelope = summary.Income + summary.TopUps - summary.PlannedExpenses;
-        if (percentUsed >= 100)
+        var daily = MoneyFormatter.Format(summary.DailyBudgetAtStart, currency);
+        var available = MoneyFormatter.Format(summary.AvailableToday, currency);
+
+        if (summary.AvailableToday < 0 || percentUsed >= 100)
         {
-            return $"⚠️ Вы вышли за рамки бюджета.\n" +
-                   $"Потрачено: {MoneyFormatter.Format(summary.Spent, currency)}" +
-                   (envelope > 0 ? $" из {MoneyFormatter.Format(envelope, currency)}" : "") +
-                   $"\nОстаток: {MoneyFormatter.Format(summary.Remaining, currency)}";
+            return $"⚠️ Вы вышли за рамки дневного бюджета.\n" +
+                   $"Дневной бюджет: {daily}\n" +
+                   $"Доступно сегодня: {available}";
         }
 
-        return $"⚠️ Потрачено уже {percentUsed}% бюджета (порог {threshold}%).\n" +
-               $"Факт: {MoneyFormatter.Format(summary.Spent, currency)}" +
-               (envelope > 0 ? $" / {MoneyFormatter.Format(envelope, currency)}" : "") +
-               $"\nОстаток: {MoneyFormatter.Format(summary.Remaining, currency)}";
+        return $"⚠️ Использовано уже {percentUsed}% дневного бюджета (порог {threshold}%).\n" +
+               $"Дневной бюджет: {daily}\n" +
+               $"Доступно сегодня: {available}";
     }
 
-    public static int? TryGetSpendPercent(BudgetSummary summary)
+    /// <summary>
+    /// Доля дневного бюджета, уже «съеденная» относительно «Доступно сегодня».
+    /// 0% — доступно ≥ дневного; 80% — осталось 20% дневного; &gt;100% — ушли в минус.
+    /// </summary>
+    public static int? TryGetDailySpendPercent(BudgetSummary summary)
     {
-        var envelope = summary.Income + summary.TopUps - summary.PlannedExpenses;
-        if (envelope <= 0) return summary.Spent > 0 ? 100 : null;
-        return (int)Math.Round(summary.Spent / envelope * 100m, MidpointRounding.AwayFromZero);
+        var daily = summary.DailyBudgetAtStart;
+        if (daily <= 0)
+            return summary.AvailableToday < 0 ? 100 : null;
+
+        var used = daily - summary.AvailableToday;
+        if (used <= 0) return 0;
+        return (int)Math.Round(used / daily * 100m, MidpointRounding.AwayFromZero);
+    }
+
+    public static bool IsDailyBudgetAlertTriggered(
+        BudgetSummary summary,
+        int thresholdPercent,
+        out int percentUsed)
+    {
+        percentUsed = 0;
+        if (summary.AvailableToday < 0)
+        {
+            percentUsed = TryGetDailySpendPercent(summary) ?? 100;
+            return true;
+        }
+
+        var percent = TryGetDailySpendPercent(summary);
+        if (percent is null) return false;
+        percentUsed = percent.Value;
+        return percentUsed >= thresholdPercent;
     }
 }

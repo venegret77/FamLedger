@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RouterProvider } from 'react-router-dom'
 import { ApiError } from './api/client'
 import { ConfirmDialogProvider } from './components/ui/ConfirmDialog'
+import { ToastProvider } from './components/ui/Toast'
 import { router } from './routes/router'
 
 const queryClient = new QueryClient({
@@ -21,7 +22,9 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <ConfirmDialogProvider>
-        <RouterProvider router={router} />
+        <ToastProvider>
+          <RouterProvider router={router} />
+        </ToastProvider>
       </ConfirmDialogProvider>
     </QueryClientProvider>
   )

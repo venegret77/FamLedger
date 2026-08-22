@@ -197,12 +197,17 @@ public class ReminderService(AppDbContext db) : IReminderService
             .ToListAsync(ct);
     }
 
-    public async Task<IReadOnlyList<Reminder>> GetEnabledBudgetAlertsAsync(CancellationToken ct = default)
+    public async Task<IReadOnlyList<Reminder>> GetEnabledBudgetAlertsAsync(
+        Guid contextId,
+        CancellationToken ct = default)
     {
         return await db.Reminders
             .Include(r => r.CreatedByUser)
             .Include(r => r.Context)
-            .Where(r => r.IsEnabled && r.Kind == ReminderKind.BudgetAlert)
+            .Where(r =>
+                r.IsEnabled &&
+                r.Kind == ReminderKind.BudgetAlert &&
+                r.ContextId == contextId)
             .ToListAsync(ct);
     }
 

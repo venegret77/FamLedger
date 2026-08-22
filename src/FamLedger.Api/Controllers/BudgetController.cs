@@ -23,7 +23,8 @@ public class BudgetController(
     IDebtService debtService,
     ISavingsService savingsService,
     IGoalService goalService,
-    IExchangeRateService exchangeRateService) : ControllerBase
+    IExchangeRateService exchangeRateService,
+    IBudgetAlertService budgetAlertService) : ControllerBase
 {
     private async Task<(Domain.Entities.BudgetContext Context, Domain.Entities.BudgetPeriod Period)> GetActiveContextAsync(CancellationToken ct)
     {
@@ -101,9 +102,10 @@ public class BudgetController(
             && !Enum.TryParse(request.Kind, ignoreCase: true, out kind))
             return BadRequest(new { message = "Invalid kind" });
 
+        var userId = User.GetUserId();
         var tx = await expenseService.AddAsync(
             context.Id,
-            User.GetUserId(),
+            userId,
             request.Amount,
             request.Currency,
             request.CategoryId,
@@ -111,7 +113,28 @@ public class BudgetController(
             request.Date,
             kind,
             ct);
-        return Ok(new { tx.Id, Kind = tx.Kind.ToString() });
+
+        BudgetAlertInfo? budgetAlert = null;
+        if (kind == Domain.Enums.TransactionKind.Expense)
+        {
+            budgetAlert = await budgetAlertService.EvaluateAfterExpenseAsync(
+                context.Id, userId, notifyViaTelegram: false, ct);
+        }
+
+        return Ok(new
+        {
+            tx.Id,
+            Kind = tx.Kind.ToString(),
+            budgetAlert = budgetAlert is null
+                ? null
+                : new
+                {
+                    budgetAlert.Message,
+                    budgetAlert.PercentUsed,
+                    budgetAlert.ThresholdPercent,
+                    budgetAlert.OverBudget
+                }
+        });
     }
 
     [HttpDelete("transactions/{id:guid}")]
