@@ -6,7 +6,10 @@ namespace FamLedger.Interfaces.Services;
 public interface IBudgetPeriodService
 {
     Task<BudgetPeriod> EnsureActivePeriodAsync(BudgetContext context, CancellationToken ct = default);
-    Task<BudgetPeriod> ClosePeriodAsync(BudgetPeriod period, BudgetContext context, CancellationToken ct = default);
+    Task<BudgetPeriod> ClosePeriodAsync(BudgetPeriod period, BudgetContext context, Guid? closedByUserId = null, CancellationToken ct = default);
+    Task<BudgetPeriod> CloseActivePeriodAsync(Guid contextId, Guid userId, CancellationToken ct = default);
+    Task<IReadOnlyList<PeriodListItem>> GetPeriodsAsync(Guid contextId, CancellationToken ct = default);
+    Task<PeriodHistoryDetail?> GetPeriodHistoryAsync(Guid contextId, Guid periodId, CancellationToken ct = default);
     (DateOnly Start, DateOnly End, string Label) GetPeriodBounds(BudgetContext context, DateOnly referenceDate);
 }
 

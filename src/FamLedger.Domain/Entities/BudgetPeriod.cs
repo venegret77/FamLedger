@@ -11,6 +11,7 @@ public class BudgetPeriod
     public bool IsClosed { get; set; }
 
     public BudgetContext Context { get; set; } = null!;
+    public PeriodSnapshot? Snapshot { get; set; }
     public ICollection<PeriodRecurringItem> RecurringItems { get; set; } = new List<PeriodRecurringItem>();
     public ICollection<OneOffExpense> OneOffExpenses { get; set; } = new List<OneOffExpense>();
     public ICollection<Transaction> Transactions { get; set; } = new List<Transaction>();

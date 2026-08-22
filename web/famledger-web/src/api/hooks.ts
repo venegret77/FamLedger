@@ -11,10 +11,13 @@ import type {
   FamilyMemberRole,
   Income,
   OneOffExpense,
+  PeriodHistoryDetail,
+  PeriodListItem,
   RecurringExpense,
   Reminder,
   ReminderAudience,
   SavingsResponse,
+  StartNewPeriodResponse,
   Transaction,
   UserProfile,
 } from './types'
@@ -23,6 +26,8 @@ export const queryKeys = {
   me: ['me'] as const,
   dashboard: ['dashboard'] as const,
   transactions: ['transactions'] as const,
+  periods: ['periods'] as const,
+  periodDetail: (id: string) => ['periods', id] as const,
   recurring: ['plan', 'recurring'] as const,
   oneOff: ['plan', 'one-off'] as const,
   incomes: ['plan', 'incomes'] as const,
@@ -63,10 +68,47 @@ export function useCategories() {
   })
 }
 
-export function useTransactions() {
+export function useTransactions(periodId?: string) {
   return useQuery({
-    queryKey: queryKeys.transactions,
-    queryFn: () => apiFetch<Transaction[]>('/api/transactions'),
+    queryKey: periodId ? [...queryKeys.transactions, periodId] as const : queryKeys.transactions,
+    queryFn: () =>
+      apiFetch<Transaction[]>(
+        periodId ? `/api/transactions?periodId=${periodId}` : '/api/transactions',
+      ),
+  })
+}
+
+export function usePeriods() {
+  return useQuery({
+    queryKey: queryKeys.periods,
+    queryFn: () => apiFetch<PeriodListItem[]>('/api/periods'),
+  })
+}
+
+export function usePeriodHistory(periodId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.periodDetail(periodId ?? ''),
+    queryFn: () => apiFetch<PeriodHistoryDetail>(`/api/periods/${periodId}`),
+    enabled: Boolean(periodId),
+  })
+}
+
+export function useStartNewPeriod() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: () =>
+      apiFetch<StartNewPeriodResponse>('/api/periods/close', { method: 'POST' }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.dashboard, refetchType: 'all' }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.transactions, refetchType: 'all' }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.periods, refetchType: 'all' }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.recurring, refetchType: 'all' }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.oneOff, refetchType: 'all' }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.savings, refetchType: 'all' }),
+      ])
+    },
   })
 }
 

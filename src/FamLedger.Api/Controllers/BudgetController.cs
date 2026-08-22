@@ -60,8 +60,93 @@ public class BudgetController(
             summary.DaysRemaining,
             summary.PeriodLabel,
             summary.PeriodId,
+            periodStart = period.StartDate,
+            periodEnd = period.EndDate,
+            canStartNewPeriod = FamLedger.Common.PeriodCloseRules.CanStartNewPeriod(period, today),
             currency = context.BaseCurrency
         });
+    }
+
+    [HttpGet("periods")]
+    public async Task<IActionResult> ListPeriods(CancellationToken ct)
+    {
+        var (context, _) = await GetActiveContextAsync(ct);
+        var list = await periodService.GetPeriodsAsync(context.Id, ct);
+        return Ok(list.Select(p => new
+        {
+            p.Id,
+            p.Label,
+            startDate = p.StartDate,
+            endDate = p.EndDate,
+            p.IsClosed,
+            p.IsActive,
+            p.Income,
+            p.TopUps,
+            p.PlannedExpenses,
+            p.Spent,
+            p.Remaining,
+            p.TransactionCount,
+            closedAt = p.ClosedAt,
+            currency = context.BaseCurrency
+        }));
+    }
+
+    [HttpGet("periods/{periodId:guid}")]
+    public async Task<IActionResult> PeriodHistory(Guid periodId, CancellationToken ct)
+    {
+        var (context, _) = await GetActiveContextAsync(ct);
+        var detail = await periodService.GetPeriodHistoryAsync(context.Id, periodId, ct);
+        if (detail is null)
+            return NotFound();
+
+        return Ok(new
+        {
+            detail.Id,
+            detail.Label,
+            startDate = detail.StartDate,
+            endDate = detail.EndDate,
+            detail.IsClosed,
+            detail.IsActive,
+            detail.Income,
+            detail.TopUps,
+            detail.PlannedExpenses,
+            detail.Spent,
+            detail.Remaining,
+            detail.DailyBudget,
+            detail.DaysInPeriod,
+            detail.TransactionCount,
+            detail.ExpenseCount,
+            detail.IncomeCount,
+            closedAt = detail.ClosedAt,
+            currency = context.BaseCurrency,
+            byCategory = detail.ByCategory.Select(c => new { c.Name, c.Amount, c.Count }),
+            byDay = detail.ByDay.Select(d => new { date = d.Date, d.Spent, d.TopUps })
+        });
+    }
+
+    [HttpPost("periods/close")]
+    public async Task<IActionResult> StartNewPeriod(CancellationToken ct)
+    {
+        var (context, _) = await GetActiveContextAsync(ct);
+        try
+        {
+            var newPeriod = await periodService.CloseActivePeriodAsync(context.Id, User.GetUserId(), ct);
+            return Ok(new
+            {
+                periodId = newPeriod.Id,
+                periodLabel = newPeriod.Label,
+                startDate = newPeriod.StartDate,
+                endDate = newPeriod.EndDate
+            });
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     public record AddTransactionRequest(
@@ -73,10 +158,20 @@ public class BudgetController(
         string? Kind);
 
     [HttpGet("transactions")]
-    public async Task<IActionResult> Transactions(CancellationToken ct)
+    public async Task<IActionResult> Transactions([FromQuery] Guid? periodId, CancellationToken ct)
     {
-        var (_, period) = await GetActiveContextAsync(ct);
-        var list = await expenseService.GetByPeriodAsync(period.Id, ct);
+        var (context, activePeriod) = await GetActiveContextAsync(ct);
+        var targetPeriodId = activePeriod.Id;
+        if (periodId is not null && periodId != activePeriod.Id)
+        {
+            var exists = await db.BudgetPeriods.AnyAsync(
+                p => p.Id == periodId && p.ContextId == context.Id, ct);
+            if (!exists)
+                return NotFound();
+            targetPeriodId = periodId.Value;
+        }
+
+        var list = await expenseService.GetByPeriodAsync(targetPeriodId, ct);
         return Ok(list.Select(t => new
         {
             t.Id,

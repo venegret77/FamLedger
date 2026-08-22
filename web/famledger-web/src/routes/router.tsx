@@ -4,6 +4,7 @@ import { AppLayout } from '../components/layout/AppLayout'
 import { DashboardPage } from '../pages/DashboardPage'
 import { DebtsPage } from '../pages/DebtsPage'
 import { FamilyPage } from '../pages/FamilyPage'
+import { HistoryPage } from '../pages/HistoryPage'
 import { LoginPage } from '../pages/LoginPage'
 import { PlanPage } from '../pages/PlanPage'
 import { RemindersPage } from '../pages/RemindersPage'
@@ -28,6 +29,7 @@ export const router = createBrowserRouter([
           { path: 'savings', element: <SavingsPage /> },
           { path: 'debts', element: <DebtsPage /> },
           { path: 'transactions', element: <TransactionsPage /> },
+          { path: 'history', element: <HistoryPage /> },
           { path: 'reminders', element: <RemindersPage /> },
           { path: 'family', element: <FamilyPage /> },
           { path: 'settings', element: <SettingsPage /> },

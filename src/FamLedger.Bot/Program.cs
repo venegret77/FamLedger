@@ -1,8 +1,8 @@
-using FamLedger.Services.Extensions;
+using FamLedger.Bot.Workers;
 using FamLedger.Interfaces.Settings;
 using FamLedger.Repository;
+using FamLedger.Services.Extensions;
 using FamLedger.Telegram;
-using FamLedger.Bot.Workers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Telegram.Bot;
@@ -19,7 +19,7 @@ builder.Services.AddSingleton<ITelegramBotClient>(sp =>
 builder.Services.AddSingleton<TelegramBot>();
 
 builder.Services.AddHostedService<TelegramWorker>();
-builder.Services.AddHostedService<PeriodRolloverWorker>();
+// Periods close only via "Начать новый месяц" — no automatic rollover.
 builder.Services.AddHostedService<RecurringChargeWorker>();
 builder.Services.AddHostedService<ExchangeRateWorker>();
 builder.Services.AddHostedService<ReminderWorker>();

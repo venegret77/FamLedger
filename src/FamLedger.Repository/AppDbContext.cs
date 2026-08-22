@@ -10,6 +10,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<ContextMember> ContextMembers => Set<ContextMember>();
     public DbSet<JoinRequest> JoinRequests => Set<JoinRequest>();
     public DbSet<BudgetPeriod> BudgetPeriods => Set<BudgetPeriod>();
+    public DbSet<PeriodSnapshot> PeriodSnapshots => Set<PeriodSnapshot>();
     public DbSet<Category> Categories => Set<Category>();
     public DbSet<Transaction> Transactions => Set<Transaction>();
     public DbSet<RecurringExpense> RecurringExpenses => Set<RecurringExpense>();
@@ -75,6 +76,20 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasIndex(x => new { x.ContextId, x.StartDate });
             e.Property(x => x.Label).HasMaxLength(64);
             e.HasOne(x => x.Context).WithMany(x => x.Periods).HasForeignKey(x => x.ContextId);
+            e.HasOne(x => x.Snapshot).WithOne(x => x.Period).HasForeignKey<PeriodSnapshot>(x => x.PeriodId);
+        });
+
+        modelBuilder.Entity<PeriodSnapshot>(e =>
+        {
+            e.ToTable("period_snapshots");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.PeriodId).IsUnique();
+            e.HasIndex(x => x.ContextId);
+            e.Property(x => x.CategoryBreakdownJson).HasColumnType("jsonb");
+            e.Property(x => x.DailyBreakdownJson).HasColumnType("jsonb");
+            e.HasOne(x => x.Context).WithMany().HasForeignKey(x => x.ContextId);
+            e.HasOne(x => x.ClosedByUser).WithMany().HasForeignKey(x => x.ClosedByUserId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<Category>(e =>

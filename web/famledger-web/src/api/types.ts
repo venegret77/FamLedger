@@ -22,6 +22,9 @@ export interface BudgetSummary {
   daysRemaining: number
   periodLabel: string
   periodId: string
+  periodStart?: string
+  periodEnd?: string
+  canStartNewPeriod?: boolean
   currency: string
 }
 
@@ -242,4 +245,63 @@ export interface Reminder {
   canEdit: boolean
   createdAtUtc: string
   updatedAtUtc: string
+}
+
+export interface PeriodListItem {
+  id: string
+  label: string
+  startDate: string
+  endDate: string
+  isClosed: boolean
+  isActive: boolean
+  income?: number | null
+  topUps?: number | null
+  plannedExpenses?: number | null
+  spent?: number | null
+  remaining?: number | null
+  transactionCount?: number | null
+  closedAt?: string | null
+  currency: string
+}
+
+export interface PeriodCategoryBreakdown {
+  name: string
+  amount: number
+  count: number
+}
+
+export interface PeriodDailyBreakdown {
+  date: string
+  spent: number
+  topUps: number
+}
+
+export interface PeriodHistoryDetail {
+  id: string
+  label: string
+  startDate: string
+  endDate: string
+  isClosed: boolean
+  isActive: boolean
+  income: number
+  topUps: number
+  plannedExpenses: number
+  spent: number
+  remaining: number
+  dailyBudget: number
+  daysInPeriod: number
+  transactionCount: number
+  expenseCount: number
+  incomeCount: number
+  closedAt?: string | null
+  currency: string
+  byCategory: PeriodCategoryBreakdown[]
+  byDay: PeriodDailyBreakdown[]
+}
+
+export interface StartNewPeriodResponse {
+  periodId: string
+  periodLabel: string
+  startDate: string
+  endDate: string
 }

@@ -3,6 +3,8 @@ import {
   useCategories,
   useCreateTransaction,
   useDashboard,
+  usePermissions,
+  useStartNewPeriod,
   useTransactions,
 } from '../api/hooks'
 import { Card, CardTitle } from '../components/ui/Card'
@@ -11,19 +13,24 @@ import { Input, Select } from '../components/ui/Input'
 import { EmptyState, PageHeader, Spinner, Tabs } from '../components/ui/Tabs'
 import { StatCard } from '../components/ui/MoneyDisplay'
 import { MobileMoreMenu } from '../components/layout/Navigation'
+import { useConfirmDialog } from '../components/ui/ConfirmDialog'
 import { useToast } from '../components/ui/Toast'
 import { formatMoney } from '../lib/format'
 import { currencyOptions } from '../api/types'
 import type { FormEvent } from 'react'
+import { ApiError } from '../api/client'
 
 type TxMode = 'Expense' | 'Income'
 
 export function DashboardPage() {
   const { showToast } = useToast()
+  const { confirm } = useConfirmDialog()
+  const { canManagePlan } = usePermissions()
   const { data: summary, isLoading, isError, refetch } = useDashboard()
   const { data: categories } = useCategories()
   const { data: transactions } = useTransactions()
   const createTransaction = useCreateTransaction()
+  const startNewPeriod = useStartNewPeriod()
 
   const [mode, setMode] = useState<TxMode>('Expense')
   const [amount, setAmount] = useState('')
@@ -79,6 +86,33 @@ export function DashboardPage() {
     setNote('')
   }
 
+  async function handleStartNewMonth() {
+    const ok = await confirm({
+      title: 'Начать новый месяц?',
+      message:
+        'Текущий период будет закрыт: сохраним статистику для истории, все операции останутся. Откроется следующий месяц с постоянными расходами.',
+      confirmText: 'Начать новый месяц',
+      cancelText: 'Ещё подождать',
+      variant: 'primary',
+    })
+    if (!ok) return
+
+    try {
+      const result = await startNewPeriod.mutateAsync()
+      showToast({
+        title: 'Новый месяц начат',
+        message: result.periodLabel,
+        tone: 'info',
+      })
+    } catch (err) {
+      const message =
+        err instanceof ApiError
+          ? ((err.body as { message?: string } | null)?.message ?? err.message)
+          : 'Не удалось закрыть период'
+      showToast({ title: 'Ошибка', message, tone: 'warning' })
+    }
+  }
+
   if (isLoading) {
     return (
       <div className="flex justify-center py-20">
@@ -118,12 +152,34 @@ export function DashboardPage() {
     { label: 'Факт', amount: summary.spent },
   ]
 
+  const showStartMonth = canManagePlan && Boolean(summary.canStartNewPeriod)
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Главная"
         subtitle={summary.periodLabel || 'Текущий период'}
       />
+
+      {showStartMonth && (
+        <Card className="border-brand-200 bg-brand-50/60">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="font-semibold text-slate-900">Период почти закончился</p>
+              <p className="mt-1 text-sm text-slate-600">
+                Когда всё посчитано — закройте месяц. Новый период сам не начнётся.
+              </p>
+            </div>
+            <Button
+              onClick={() => void handleStartNewMonth()}
+              loading={startNewPeriod.isPending}
+              className="shrink-0"
+            >
+              Начать новый месяц
+            </Button>
+          </div>
+        </Card>
+      )}
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         <StatCard
