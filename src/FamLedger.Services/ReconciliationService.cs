@@ -104,7 +104,6 @@ public class ReconciliationService(
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         var summary = await calculator.CalculateAsync(context, period, today, ct);
 
-        var savingsActual = await GetSavingsActualByCurrencyAsync(context.Id, ct);
         var debtsOwedToUs = await GetDebtsByCurrencyAsync(context.Id, DebtDirection.TheyOwe, ct);
         var debtsWeOwe = await GetDebtsByCurrencyAsync(context.Id, DebtDirection.WeOwe, ct);
         var unpaidPlanned = await GetUnpaidPlannedByCurrencyAsync(period.Id, ct);
@@ -114,7 +113,6 @@ public class ReconciliationService(
 
         var assetLines = new List<ReconciliationLine>
         {
-            AutoLine("savingsActual", "Копилка (факт)", savingsActual),
             AutoLine("debtsOwedToUs", "Долги (нам должны)", debtsOwedToUs),
         };
         assetLines.AddRange(manual.AssetItems.Select(ManualEntryLine));
@@ -127,7 +125,6 @@ public class ReconciliationService(
         obligationLines.AddRange(manual.ObligationItems.Select(ManualEntryLine));
 
         var assetTotals = CurrencyAmountHelper.MergeAmounts(
-            savingsActual,
             manualAssets,
             debtsOwedToUs);
         var obligationTotals = CurrencyAmountHelper.MergeAmounts(
@@ -181,20 +178,6 @@ public class ReconciliationService(
 
     private static ReconciliationManualInput EmptyManual() =>
         new([], []);
-
-    private async Task<Dictionary<string, decimal>> GetSavingsActualByCurrencyAsync(
-        Guid contextId,
-        CancellationToken ct)
-    {
-        var deposits = await db.SavingsDeposits
-            .Where(d => d.ContextId == contextId)
-            .Select(d => new { d.Amount, d.Currency })
-            .ToListAsync(ct);
-
-        return deposits
-            .GroupBy(d => d.Currency.ToUpperInvariant())
-            .ToDictionary(g => g.Key, g => g.Sum(x => x.Amount), StringComparer.OrdinalIgnoreCase);
-    }
 
     private async Task<Dictionary<string, decimal>> GetDebtsByCurrencyAsync(
         Guid contextId,

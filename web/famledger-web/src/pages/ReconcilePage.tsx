@@ -126,7 +126,7 @@ export function ReconcilePage() {
           baseCurrency={baseCurrency}
           canEdit={data.canEdit}
           addLabel="Добавить актив"
-          namePlaceholder="Карты, наличные…"
+          namePlaceholder="Карты, наличные, копилка…"
           onAdd={(entry) => void addItem('assetItems', entry)}
           onRemove={async (id) => {
             const accepted = await confirm({
