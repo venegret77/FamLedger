@@ -95,9 +95,20 @@ public interface ISavingsService
     Task SetPlanAsync(Guid contextId, Guid periodId, decimal plannedAmount, string currency, Guid userId, CancellationToken ct = default);
     Task<decimal> GetTotalBalanceAsync(Guid contextId, CancellationToken ct = default);
     Task<IReadOnlyList<SavingsPeriodView>> GetPlansAsync(Guid contextId, CancellationToken ct = default);
+    Task<IReadOnlyList<SavingsMovementView>> GetMovementsAsync(Guid contextId, CancellationToken ct = default);
+    Task DeleteDepositAsync(Guid contextId, Guid depositId, Guid userId, CancellationToken ct = default);
 }
 
 public record SavingsAmountByCurrency(decimal Amount, string Currency);
+
+public record SavingsMovementView(
+    Guid Id,
+    Guid PeriodId,
+    string? PeriodLabel,
+    decimal Amount,
+    string Currency,
+    DateTime CreatedAt,
+    string? CreatedByName);
 
 public record SavingsPeriodView(
     Guid Id,

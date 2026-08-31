@@ -134,7 +134,18 @@ export interface SavingsResponse {
     actualByCurrency?: SavingsAmountByCurrency[]
   }
   plans: SavingsEntry[]
+  movements?: SavingsMovement[]
   goals: SavingsGoal[]
+}
+
+export interface SavingsMovement {
+  id: string
+  periodId: string
+  periodLabel?: string
+  amount: number
+  currency: string
+  createdAt: string
+  createdByName?: string
 }
 
 export interface SavingsAmountByCurrency {
@@ -315,6 +326,7 @@ export interface ReconciliationLine {
   key: string
   label: string
   isManual: boolean
+  entryId?: string
   amounts: ReconciliationAmount[]
 }
 
@@ -332,12 +344,16 @@ export interface ReconciliationSummary {
   difference: number
 }
 
+export interface ReconciliationManualEntry {
+  id: string
+  name: string
+  amount: number
+  currency: string
+}
+
 export interface ReconciliationManualInput {
-  cards: Record<string, number>
-  cash: Record<string, number>
-  setAside: Record<string, number>
-  manualPlanned: Record<string, number>
-  savingsPlan: Record<string, number>
+  assetItems: ReconciliationManualEntry[]
+  obligationItems: ReconciliationManualEntry[]
 }
 
 export interface ReconciliationView {

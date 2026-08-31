@@ -24,7 +24,7 @@ public class ReconciliationService(
         CancellationToken ct = default)
     {
         var (context, period, canEdit) = await GetContextAsync(contextId, periodId, userId, ct);
-        var manual = await GetOrCreateManualAsync(context.Id, period.Id, ct);
+        var manual = await LoadManualAsync(context.Id, period.Id, ct);
         return await BuildViewAsync(context, period, manual, canEdit, ct);
     }
 
@@ -52,11 +52,8 @@ public class ReconciliationService(
             db.PeriodReconciliations.Add(entity);
         }
 
-        entity.CardsJson = CurrencyAmountHelper.ToJson(manual.Cards);
-        entity.CashJson = CurrencyAmountHelper.ToJson(manual.Cash);
-        entity.SetAsideJson = CurrencyAmountHelper.ToJson(manual.SetAside);
-        entity.ManualPlannedJson = CurrencyAmountHelper.ToJson(manual.ManualPlanned);
-        entity.SavingsPlanJson = CurrencyAmountHelper.ToJson(manual.SavingsPlan);
+        entity.AssetItemsJson = ReconciliationItemsHelper.ToJson(manual.AssetItems);
+        entity.ObligationItemsJson = ReconciliationItemsHelper.ToJson(manual.ObligationItems);
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedByUserId = userId;
         await db.SaveChangesAsync(ct);
@@ -81,7 +78,7 @@ public class ReconciliationService(
         return (context, period, canEdit);
     }
 
-    private async Task<ReconciliationManualInput> GetOrCreateManualAsync(
+    private async Task<ReconciliationManualInput> LoadManualAsync(
         Guid contextId,
         Guid periodId,
         CancellationToken ct)
@@ -93,11 +90,8 @@ public class ReconciliationService(
             return EmptyManual();
 
         return new ReconciliationManualInput(
-            CurrencyAmountHelper.ParseJson(entity.CardsJson),
-            CurrencyAmountHelper.ParseJson(entity.CashJson),
-            CurrencyAmountHelper.ParseJson(entity.SetAsideJson),
-            CurrencyAmountHelper.ParseJson(entity.ManualPlannedJson),
-            CurrencyAmountHelper.ParseJson(entity.SavingsPlanJson));
+            ReconciliationItemsHelper.ParseItems(entity.AssetItemsJson),
+            ReconciliationItemsHelper.ParseItems(entity.ObligationItemsJson));
     }
 
     private async Task<ReconciliationView> BuildViewAsync(
@@ -115,33 +109,30 @@ public class ReconciliationService(
         var debtsWeOwe = await GetDebtsByCurrencyAsync(context.Id, DebtDirection.WeOwe, ct);
         var unpaidPlanned = await GetUnpaidPlannedByCurrencyAsync(period.Id, ct);
 
+        var manualAssets = ReconciliationItemsHelper.ToCurrencyTotals(manual.AssetItems);
+        var manualObligations = ReconciliationItemsHelper.ToCurrencyTotals(manual.ObligationItems);
+
         var assetLines = new List<ReconciliationLine>
         {
-            Line("savingsActual", "Копилка (факт)", false, savingsActual),
-            Line("cards", "Карты", true, manual.Cards),
-            Line("cash", "Наличные", true, manual.Cash),
-            Line("setAside", "Отложено на след. месяц", true, manual.SetAside),
-            Line("debtsOwedToUs", "Долги (нам должны)", false, debtsOwedToUs)
+            AutoLine("savingsActual", "Копилка (факт)", savingsActual),
+            AutoLine("debtsOwedToUs", "Долги (нам должны)", debtsOwedToUs),
         };
+        assetLines.AddRange(manual.AssetItems.Select(ManualEntryLine));
 
         var obligationLines = new List<ReconciliationLine>
         {
-            Line("savingsPlan", "Копилка (план)", true, manual.SavingsPlan),
-            Line("unpaidPlanned", "Плановые расходы (не оплачены)", false, unpaidPlanned),
-            Line("manualPlanned", "Плановые вручную", true, manual.ManualPlanned),
-            Line("debtsWeOwe", "Долги (мы должны)", false, debtsWeOwe)
+            AutoLine("unpaidPlanned", "Плановые расходы (не оплачены)", unpaidPlanned),
+            AutoLine("debtsWeOwe", "Долги (мы должны)", debtsWeOwe),
         };
+        obligationLines.AddRange(manual.ObligationItems.Select(ManualEntryLine));
 
         var assetTotals = CurrencyAmountHelper.MergeAmounts(
             savingsActual,
-            manual.Cards,
-            manual.Cash,
-            manual.SetAside,
+            manualAssets,
             debtsOwedToUs);
         var obligationTotals = CurrencyAmountHelper.MergeAmounts(
-            manual.SavingsPlan,
             unpaidPlanned,
-            manual.ManualPlanned,
+            manualObligations,
             debtsWeOwe);
 
         var assetTotalBase = await SumToBaseAsync(context, period.Id, assetTotals, ct);
@@ -174,20 +165,22 @@ public class ReconciliationService(
             manual);
     }
 
-    private static ReconciliationLine Line(
+    private static ReconciliationLine AutoLine(
         string key,
         string label,
-        bool isManual,
         IReadOnlyDictionary<string, decimal> amounts) =>
-        new(key, label, isManual, CurrencyAmountHelper.ToAmounts(amounts));
+        new(key, label, false, CurrencyAmountHelper.ToAmounts(amounts));
+
+    private static ReconciliationLine ManualEntryLine(ReconciliationManualEntry entry) =>
+        new(
+            $"item-{entry.Id}",
+            entry.Name,
+            true,
+            [new CurrencyAmount(entry.Currency, entry.Amount)],
+            entry.Id);
 
     private static ReconciliationManualInput EmptyManual() =>
-        new(
-            new Dictionary<string, decimal>(),
-            new Dictionary<string, decimal>(),
-            new Dictionary<string, decimal>(),
-            new Dictionary<string, decimal>(),
-            new Dictionary<string, decimal>());
+        new([], []);
 
     private async Task<Dictionary<string, decimal>> GetSavingsActualByCurrencyAsync(
         Guid contextId,

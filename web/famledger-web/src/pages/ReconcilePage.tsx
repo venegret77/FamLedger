@@ -1,24 +1,26 @@
-import { useEffect, useMemo, useState } from 'react'
-import { useReconciliation, useSaveReconciliation } from '../api/hooks'
-import { CURRENCIES, type ReconciliationManualInput, type ReconciliationSide } from '../api/types'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useReconciliation, useSaveReconciliation, useSettings } from '../api/hooks'
+import {
+  currencyOptions,
+  type ReconciliationAmount,
+  type ReconciliationManualEntry,
+  type ReconciliationManualInput,
+} from '../api/types'
 import { Card, CardTitle } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
-import { Input } from '../components/ui/Input'
+import { Input, Select } from '../components/ui/Input'
 import { EmptyState, PageHeader, Spinner } from '../components/ui/Tabs'
+import { useConfirmDialog } from '../components/ui/ConfirmDialog'
 import { formatMoney } from '../lib/format'
 
-type ManualField = keyof ReconciliationManualInput
-
-const manualFieldByLineKey: Record<string, ManualField> = {
-  cards: 'cards',
-  cash: 'cash',
-  setAside: 'setAside',
-  manualPlanned: 'manualPlanned',
-  savingsPlan: 'savingsPlan',
-}
+type ManualSide = 'assetItems' | 'obligationItems'
 
 function emptyManual(): ReconciliationManualInput {
-  return { cards: {}, cash: {}, setAside: {}, manualPlanned: {}, savingsPlan: {} }
+  return { assetItems: [], obligationItems: [] }
+}
+
+function newEntryId(): string {
+  return crypto.randomUUID()
 }
 
 function formatAmounts(amounts: { currency: string; amount: number }[]): string {
@@ -27,19 +29,19 @@ function formatAmounts(amounts: { currency: string; amount: number }[]): string 
 }
 
 export function ReconcilePage() {
+  const { confirm } = useConfirmDialog()
+  const { data: settings } = useSettings()
   const { data, isLoading, isError, refetch } = useReconciliation()
   const save = useSaveReconciliation()
   const [manual, setManual] = useState<ReconciliationManualInput>(emptyManual)
-  const [dirty, setDirty] = useState(false)
 
   useEffect(() => {
     if (data?.manual) {
       setManual(data.manual)
-      setDirty(false)
     }
   }, [data?.manual])
 
-  const baseCurrency = data?.baseCurrency ?? 'RSD'
+  const baseCurrency = data?.baseCurrency ?? settings?.baseCurrency ?? 'RSD'
 
   const differenceTone = useMemo(() => {
     if (!data) return 'neutral'
@@ -49,26 +51,36 @@ export function ReconcilePage() {
     return 'bad'
   }, [data])
 
-  function updateManualField(field: ManualField, currency: string, raw: string) {
-    const parsed = raw.trim() === '' ? 0 : Number.parseFloat(raw.replace(',', '.'))
-    if (raw.trim() !== '' && (Number.isNaN(parsed) || parsed < 0)) return
-
-    setManual((prev) => {
-      const next = { ...prev, [field]: { ...prev[field] } }
-      if (parsed === 0) {
-        delete next[field][currency]
-      } else {
-        next[field][currency] = parsed
-      }
-      return next
-    })
-    setDirty(true)
+  async function addItem(side: ManualSide, entry: ReconciliationManualEntry) {
+    const next = {
+      ...manual,
+      [side]: [...manual[side], entry],
+    }
+    setManual(next)
+    await save.mutateAsync(next)
   }
 
-  async function handleSave() {
-    await save.mutateAsync(manual)
-    setDirty(false)
+  async function removeItem(side: ManualSide, id: string) {
+    const next = {
+      ...manual,
+      [side]: manual[side].filter((item) => item.id !== id),
+    }
+    setManual(next)
+    await save.mutateAsync(next)
   }
+
+  const assetTotals = useMemo(
+    () => mergeTotals(data?.assets.lines.filter((l) => !l.isManual) ?? [], manual.assetItems),
+    [data?.assets.lines, manual.assetItems],
+  )
+  const obligationTotals = useMemo(
+    () =>
+      mergeTotals(
+        data?.obligations.lines.filter((l) => !l.isManual) ?? [],
+        manual.obligationItems,
+      ),
+    [data?.obligations.lines, manual.obligationItems],
+  )
 
   if (isLoading) {
     return (
@@ -98,7 +110,7 @@ export function ReconcilePage() {
         title="Сверка"
         subtitle={
           data.canEdit
-            ? `${data.periodLabel} · введите реальные остатки и сравните с учётом`
+            ? `${data.periodLabel} · добавляйте пункты и сравнивайте с учётом`
             : `${data.periodLabel} · просмотр (редактирование доступно главе и помощнику)`
         }
       />
@@ -107,20 +119,44 @@ export function ReconcilePage() {
         <ReconciliationSideCard
           title="Активы"
           subtitle="Что есть на руках"
-          side={data.assets}
+          autoLines={data.assets.lines.filter((line) => !line.isManual)}
+          manualItems={manual.assetItems}
+          totals={assetTotals}
+          totalBase={data.assets.totalBase}
           baseCurrency={baseCurrency}
-          manual={manual}
           canEdit={data.canEdit}
-          onChange={updateManualField}
+          addLabel="Добавить актив"
+          namePlaceholder="Карты, наличные…"
+          onAdd={(entry) => void addItem('assetItems', entry)}
+          onRemove={async (id) => {
+            const accepted = await confirm({
+              title: 'Удалить пункт?',
+              message: 'Строка будет убрана из сверки.',
+            })
+            if (accepted) await removeItem('assetItems', id)
+          }}
+          saving={save.isPending}
         />
         <ReconciliationSideCard
           title="Обязательства"
           subtitle="Что ещё нужно отдать"
-          side={data.obligations}
+          autoLines={data.obligations.lines.filter((line) => !line.isManual)}
+          manualItems={manual.obligationItems}
+          totals={obligationTotals}
+          totalBase={data.obligations.totalBase}
           baseCurrency={baseCurrency}
-          manual={manual}
           canEdit={data.canEdit}
-          onChange={updateManualField}
+          addLabel="Добавить обязательство"
+          namePlaceholder="Копилка план, резерв…"
+          onAdd={(entry) => void addItem('obligationItems', entry)}
+          onRemove={async (id) => {
+            const accepted = await confirm({
+              title: 'Удалить пункт?',
+              message: 'Строка будет убрана из сверки.',
+            })
+            if (accepted) await removeItem('obligationItems', id)
+          }}
+          saving={save.isPending}
         />
       </div>
 
@@ -169,35 +205,57 @@ export function ReconcilePage() {
           факту.
         </p>
       </Card>
-
-      {data.canEdit && (
-        <div className="flex flex-wrap items-center gap-3">
-          <Button onClick={() => void handleSave()} loading={save.isPending} disabled={!dirty}>
-            Сохранить
-          </Button>
-          {dirty && <span className="text-sm text-amber-700">Есть несохранённые изменения</span>}
-        </div>
-      )}
     </div>
   )
+}
+
+function mergeTotals(
+  autoLines: { amounts: ReconciliationAmount[] }[],
+  manualItems: ReconciliationManualEntry[],
+): ReconciliationAmount[] {
+  const map = new Map<string, number>()
+  for (const line of autoLines) {
+    for (const amount of line.amounts) {
+      map.set(amount.currency, (map.get(amount.currency) ?? 0) + amount.amount)
+    }
+  }
+  for (const item of manualItems) {
+    map.set(item.currency, (map.get(item.currency) ?? 0) + item.amount)
+  }
+  return [...map.entries()]
+    .filter(([, amount]) => amount !== 0)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([currency, amount]) => ({ currency, amount }))
 }
 
 function ReconciliationSideCard({
   title,
   subtitle,
-  side,
+  autoLines,
+  manualItems,
+  totals,
+  totalBase,
   baseCurrency,
-  manual,
   canEdit,
-  onChange,
+  addLabel,
+  namePlaceholder,
+  onAdd,
+  onRemove,
+  saving = false,
 }: {
   title: string
   subtitle: string
-  side: ReconciliationSide
+  autoLines: { key: string; label: string; amounts: { currency: string; amount: number }[] }[]
+  manualItems: ReconciliationManualEntry[]
+  totals: { currency: string; amount: number }[]
+  totalBase: number
   baseCurrency: string
-  manual: ReconciliationManualInput
   canEdit: boolean
-  onChange: (field: ManualField, currency: string, raw: string) => void
+  addLabel: string
+  namePlaceholder: string
+  onAdd: (entry: ReconciliationManualEntry) => void | Promise<void>
+  onRemove: (id: string) => void | Promise<void>
+  saving?: boolean
 }) {
   return (
     <Card padding="none" className="overflow-hidden">
@@ -205,66 +263,137 @@ function ReconciliationSideCard({
         <p className="font-semibold">{title}</p>
         <p className="text-sm text-emerald-100">{subtitle}</p>
       </div>
+
       <div className="divide-y divide-slate-100">
-        {side.lines.map((line) => {
-          const field = manualFieldByLineKey[line.key]
-          return (
-            <div key={line.key} className="px-5 py-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="font-medium text-slate-900">{line.label}</p>
-                  {!line.isManual && (
-                    <p className="mt-0.5 text-xs text-slate-500">из приложения</p>
-                  )}
-                </div>
-                {!line.isManual && (
-                  <p className="text-right text-sm font-medium tabular-nums text-slate-800">
-                    {formatAmounts(line.amounts)}
-                  </p>
-                )}
-              </div>
-              {line.isManual && canEdit && field && (
-                <div className="mt-3 grid gap-2 sm:grid-cols-3">
-                  {CURRENCIES.map((currency) => (
-                    <Input
-                      key={currency}
-                      label={currency}
-                      type="text"
-                      inputMode="decimal"
-                      placeholder="0"
-                      value={
-                        manual[field][currency] !== undefined
-                          ? String(manual[field][currency])
-                          : ''
-                      }
-                      onChange={(e) => onChange(field, currency, e.target.value)}
-                    />
-                  ))}
-                </div>
-              )}
-              {line.isManual && !canEdit && (
-                <p className="mt-2 text-sm tabular-nums text-slate-700">
-                  {formatAmounts(line.amounts)}
-                </p>
-              )}
+        {autoLines.map((line) => (
+          <div key={line.key} className="flex items-start justify-between gap-3 px-5 py-4">
+            <div>
+              <p className="font-medium text-slate-900">{line.label}</p>
+              <p className="mt-0.5 text-xs text-slate-500">из приложения</p>
             </div>
-          )
-        })}
+            <p className="text-right text-sm font-medium tabular-nums text-slate-800">
+              {formatAmounts(line.amounts)}
+            </p>
+          </div>
+        ))}
+
+        {manualItems.length > 0 && (
+          <ul className="divide-y divide-slate-100">
+            {manualItems.map((item) => (
+              <li key={item.id} className="flex items-center justify-between gap-3 px-5 py-3">
+                <div className="min-w-0">
+                  <p className="font-medium text-slate-900">{item.name}</p>
+                  <p className="mt-0.5 text-sm tabular-nums text-slate-600">
+                    {formatMoney(item.amount, item.currency)}
+                  </p>
+                </div>
+                {canEdit && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="shrink-0 text-red-600 hover:bg-red-50"
+                    onClick={() => onRemove(item.id)}
+                  >
+                    Удалить
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {canEdit && (
+          <div className="px-5 py-4">
+            <AddManualItemForm
+              label={addLabel}
+              namePlaceholder={namePlaceholder}
+              defaultCurrency={baseCurrency}
+              loading={saving}
+              onAdd={onAdd}
+            />
+          </div>
+        )}
+
+        {!canEdit && manualItems.length === 0 && autoLines.length === 0 && (
+          <p className="px-5 py-4 text-sm text-slate-500">Нет данных</p>
+        )}
       </div>
+
       <div className="border-t border-slate-200 bg-slate-50 px-5 py-3">
         <div className="flex items-center justify-between gap-3">
           <p className="text-sm font-semibold text-slate-700">Итого</p>
           <div className="text-right">
-            <p className="text-sm font-bold tabular-nums text-slate-900">
-              {formatAmounts(side.totals)}
-            </p>
-            <p className="text-xs text-slate-500">
-              ≈ {formatMoney(side.totalBase, baseCurrency)}
-            </p>
+            <p className="text-sm font-bold tabular-nums text-slate-900">{formatAmounts(totals)}</p>
+            <p className="text-xs text-slate-500">≈ {formatMoney(totalBase, baseCurrency)}</p>
           </div>
         </div>
       </div>
     </Card>
+  )
+}
+
+function AddManualItemForm({
+  label,
+  namePlaceholder,
+  defaultCurrency,
+  loading,
+  onAdd,
+}: {
+  label: string
+  namePlaceholder: string
+  defaultCurrency: string
+  loading?: boolean
+  onAdd: (entry: ReconciliationManualEntry) => void | Promise<void>
+}) {
+  const [name, setName] = useState('')
+  const [amount, setAmount] = useState('')
+  const [currency, setCurrency] = useState(defaultCurrency)
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault()
+    const parsed = Number.parseFloat(amount.replace(',', '.'))
+    const trimmed = name.trim()
+    if (!trimmed || Number.isNaN(parsed) || parsed <= 0) return
+
+    await onAdd({
+      id: newEntryId(),
+      name: trimmed,
+      amount: parsed,
+      currency,
+    })
+    setName('')
+    setAmount('')
+  }
+
+  return (
+    <form className="space-y-3" onSubmit={(e) => void handleSubmit(e)}>
+      <p className="text-sm font-medium text-slate-700">{label}</p>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 lg:items-end">
+        <Input
+          label="Название"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder={namePlaceholder}
+        />
+        <Input
+          label="Сумма"
+          type="text"
+          inputMode="decimal"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          placeholder="0"
+        />
+        <Select
+          label="Валюта"
+          value={currency}
+          onChange={(e) => setCurrency(e.target.value)}
+          options={currencyOptions}
+        />
+        <Button type="submit" loading={loading} className="shrink-0">
+          Добавить
+        </Button>
+      </div>
+    </form>
   )
 }
 

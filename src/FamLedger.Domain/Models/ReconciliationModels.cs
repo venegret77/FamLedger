@@ -2,11 +2,18 @@ namespace FamLedger.Domain.Models;
 
 public record CurrencyAmount(string Currency, decimal Amount);
 
+public record ReconciliationManualEntry(
+    Guid Id,
+    string Name,
+    decimal Amount,
+    string Currency);
+
 public record ReconciliationLine(
     string Key,
     string Label,
     bool IsManual,
-    IReadOnlyList<CurrencyAmount> Amounts);
+    IReadOnlyList<CurrencyAmount> Amounts,
+    Guid? EntryId = null);
 
 public record ReconciliationSide(
     IReadOnlyList<ReconciliationLine> Lines,
@@ -31,8 +38,5 @@ public record ReconciliationView(
     ReconciliationManualInput Manual);
 
 public record ReconciliationManualInput(
-    IReadOnlyDictionary<string, decimal> Cards,
-    IReadOnlyDictionary<string, decimal> Cash,
-    IReadOnlyDictionary<string, decimal> SetAside,
-    IReadOnlyDictionary<string, decimal> ManualPlanned,
-    IReadOnlyDictionary<string, decimal> SavingsPlan);
+    IReadOnlyList<ReconciliationManualEntry> AssetItems,
+    IReadOnlyList<ReconciliationManualEntry> ObligationItems);

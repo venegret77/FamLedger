@@ -131,6 +131,54 @@ public class SavingsService(
         return total;
     }
 
+    public async Task<IReadOnlyList<SavingsMovementView>> GetMovementsAsync(
+        Guid contextId,
+        CancellationToken ct = default)
+    {
+        var deposits = await db.SavingsDeposits
+            .AsNoTracking()
+            .Include(d => d.Period)
+            .Include(d => d.User)
+            .Where(d => d.ContextId == contextId)
+            .OrderByDescending(d => d.CreatedAt)
+            .ToListAsync(ct);
+
+        return deposits.Select(d => new SavingsMovementView(
+            d.Id,
+            d.PeriodId,
+            d.Period?.Label,
+            d.Amount,
+            d.Currency,
+            d.CreatedAt,
+            d.User.DisplayName ?? d.User.FirstName)).ToList();
+    }
+
+    public async Task DeleteDepositAsync(
+        Guid contextId,
+        Guid depositId,
+        Guid userId,
+        CancellationToken ct = default)
+    {
+        var deposit = await db.SavingsDeposits
+            .FirstOrDefaultAsync(d => d.Id == depositId && d.ContextId == contextId, ct)
+            ?? throw new InvalidOperationException("Операция не найдена.");
+
+        var member = await contextService.GetMembershipAsync(contextId, userId, ct);
+        if (member is null || !RolePermissions.CanManagePlan(member.Role))
+            throw new UnauthorizedAccessException();
+
+        var periodId = deposit.PeriodId;
+
+        db.SavingsDeposits.Remove(deposit);
+
+        var entry = await db.SavingsEntries
+            .FirstOrDefaultAsync(s => s.ContextId == contextId && s.PeriodId == periodId, ct);
+        if (entry is not null)
+            entry.ActualAmount = await SumDepositsInBaseAsync(contextId, periodId, ct);
+
+        await db.SaveChangesAsync(ct);
+    }
+
     public async Task<IReadOnlyList<SavingsPeriodView>> GetPlansAsync(Guid contextId, CancellationToken ct = default)
     {
         var entries = await db.SavingsEntries

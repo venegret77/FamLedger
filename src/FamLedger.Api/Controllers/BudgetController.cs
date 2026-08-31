@@ -482,6 +482,7 @@ public class BudgetController(
         var balance = await savingsService.GetTotalBalanceAsync(context.Id, ct);
         var entry = await savingsService.GetOrCreateForPeriodAsync(context.Id, period.Id, ct);
         var plans = await savingsService.GetPlansAsync(context.Id, ct);
+        var movements = await savingsService.GetMovementsAsync(context.Id, ct);
         var goals = await goalService.GetByContextAsync(context.Id, ct);
         var currentPlan = plans.FirstOrDefault(p => p.Id == entry.Id);
         return Ok(new
@@ -509,6 +510,16 @@ public class BudgetController(
                 p.PeriodStart,
                 p.PeriodEnd,
                 actualByCurrency = p.ActualByCurrency
+            }),
+            movements = movements.Select(m => new
+            {
+                m.Id,
+                m.PeriodId,
+                m.PeriodLabel,
+                m.Amount,
+                m.Currency,
+                m.CreatedAt,
+                createdByName = m.CreatedByName
             }),
             goals = await Task.WhenAll(goals.Select(async g => new
             {
@@ -561,6 +572,27 @@ public class BudgetController(
         catch (InvalidOperationException ex)
         {
             return BadRequest(new { message = ex.Message });
+        }
+
+        await goalService.RefreshCompletionFromSavingsAsync(context.Id, ct);
+        return Ok();
+    }
+
+    [HttpDelete("savings/deposits/{depositId:guid}")]
+    public async Task<IActionResult> DeleteSavingsDeposit(Guid depositId, CancellationToken ct)
+    {
+        var (context, _) = await GetActiveContextAsync(ct);
+        try
+        {
+            await savingsService.DeleteDepositAsync(context.Id, depositId, User.GetUserId(), ct);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return NotFound(new { message = ex.Message });
         }
 
         await goalService.RefreshCompletionFromSavingsAsync(context.Id, ct);
@@ -623,12 +655,11 @@ public class BudgetController(
         return Ok(ToReconciliationResponse(view));
     }
 
+    public record ReconciliationManualEntryRequest(Guid Id, string Name, decimal Amount, string Currency);
+
     public record ReconciliationManualRequest(
-        Dictionary<string, decimal>? Cards,
-        Dictionary<string, decimal>? Cash,
-        Dictionary<string, decimal>? SetAside,
-        Dictionary<string, decimal>? ManualPlanned,
-        Dictionary<string, decimal>? SavingsPlan);
+        List<ReconciliationManualEntryRequest>? AssetItems,
+        List<ReconciliationManualEntryRequest>? ObligationItems);
 
     [HttpPut("reconciliation")]
     public async Task<IActionResult> SaveReconciliation([FromBody] ReconciliationManualRequest request, CancellationToken ct)
@@ -637,11 +668,8 @@ public class BudgetController(
         try
         {
             var manual = new Domain.Models.ReconciliationManualInput(
-                request.Cards ?? [],
-                request.Cash ?? [],
-                request.SetAside ?? [],
-                request.ManualPlanned ?? [],
-                request.SavingsPlan ?? []);
+                MapManualEntries(request.AssetItems),
+                MapManualEntries(request.ObligationItems));
             var view = await reconciliationService.SaveManualAsync(
                 context.Id, period.Id, User.GetUserId(), manual, ct);
             return Ok(ToReconciliationResponse(view));
@@ -651,6 +679,17 @@ public class BudgetController(
             return Forbid();
         }
     }
+
+    private static List<Domain.Models.ReconciliationManualEntry> MapManualEntries(
+        List<ReconciliationManualEntryRequest>? items) =>
+        (items ?? [])
+            .Where(x => x.Amount != 0 && !string.IsNullOrWhiteSpace(x.Name))
+            .Select(x => new Domain.Models.ReconciliationManualEntry(
+                x.Id == Guid.Empty ? Guid.NewGuid() : x.Id,
+                x.Name.Trim(),
+                x.Amount,
+                x.Currency.ToUpperInvariant()))
+            .ToList();
 
     private static object ToReconciliationResponse(Domain.Models.ReconciliationView view) => new
     {
@@ -670,11 +709,20 @@ public class BudgetController(
         },
         manual = new
         {
-            cards = view.Manual.Cards,
-            cash = view.Manual.Cash,
-            setAside = view.Manual.SetAside,
-            manualPlanned = view.Manual.ManualPlanned,
-            savingsPlan = view.Manual.SavingsPlan
+            assetItems = view.Manual.AssetItems.Select(x => new
+            {
+                id = x.Id,
+                name = x.Name,
+                amount = x.Amount,
+                currency = x.Currency
+            }),
+            obligationItems = view.Manual.ObligationItems.Select(x => new
+            {
+                id = x.Id,
+                name = x.Name,
+                amount = x.Amount,
+                currency = x.Currency
+            })
         }
     };
 
@@ -685,6 +733,7 @@ public class BudgetController(
             l.Key,
             l.Label,
             l.IsManual,
+            entryId = l.EntryId,
             amounts = l.Amounts.Select(a => new { currency = a.Currency, amount = a.Amount })
         }),
         totals = side.Totals.Select(a => new { currency = a.Currency, amount = a.Amount }),

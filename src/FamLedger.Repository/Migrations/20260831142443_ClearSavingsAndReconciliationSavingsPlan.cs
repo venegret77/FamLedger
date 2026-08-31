@@ -10,13 +10,6 @@ namespace FamLedger.Repository.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AddColumn<string>(
-                name: "SavingsPlanJson",
-                table: "period_reconciliations",
-                type: "jsonb",
-                nullable: false,
-                defaultValue: "{}");
-
             migrationBuilder.Sql(
                 """
                 DELETE FROM goal_contributions;
@@ -29,9 +22,7 @@ namespace FamLedger.Repository.Migrations
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DropColumn(
-                name: "SavingsPlanJson",
-                table: "period_reconciliations");
+            // Irreversible data cleanup.
         }
     }
 }

@@ -2,20 +2,21 @@ import { useMemo, useState, type FormEvent } from 'react'
 import {
   useCreateGoal,
   useDeleteGoal,
+  useDeleteSavingsDeposit,
   useDepositSavings,
   usePermissions,
   useSavings,
   useSettings,
   useWithdrawSavings,
 } from '../api/hooks'
-import type { SavingsEntry } from '../api/types'
+import type { SavingsEntry, SavingsMovement } from '../api/types'
 import { currencyOptions } from '../api/types'
 import { Card } from '../components/ui/Card'
 import { EmptyState, PageHeader, Spinner, Badge } from '../components/ui/Tabs'
 import { Button } from '../components/ui/Button'
 import { useConfirmDialog } from '../components/ui/ConfirmDialog'
 import { Input, Select } from '../components/ui/Input'
-import { formatMoney } from '../lib/format'
+import { formatDateTime, formatMoney } from '../lib/format'
 import { ApiError } from '../api/client'
 
 function formatPeriodLabel(entry: SavingsEntry): string {
@@ -38,6 +39,7 @@ export function SavingsPage() {
   const deleteGoal = useDeleteGoal()
   const deposit = useDepositSavings()
   const withdraw = useWithdrawSavings()
+  const deleteDeposit = useDeleteSavingsDeposit()
 
   const [goalName, setGoalName] = useState('')
   const [goalTarget, setGoalTarget] = useState('')
@@ -48,6 +50,7 @@ export function SavingsPage() {
   const [movementError, setMovementError] = useState('')
 
   const plans = Array.isArray(data?.plans) ? data.plans : []
+  const movements = Array.isArray(data?.movements) ? data.movements : []
   const goals = Array.isArray(data?.goals) ? data.goals : []
   const currency = settings?.baseCurrency ?? data?.baseCurrency ?? plans[0]?.currency ?? 'RSD'
   const depositCurrencyValue = depositCurrency || currency
@@ -200,6 +203,34 @@ export function SavingsPage() {
         </Card>
       )}
 
+      {movements.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-lg font-semibold text-slate-900">Операции</h2>
+          <Card padding="none">
+            <ul className="divide-y divide-slate-100">
+              {movements.map((movement) => (
+                <MovementRow
+                  key={movement.id}
+                  movement={movement}
+                  canDelete={canManagePlan}
+                  deleting={deleteDeposit.isPending}
+                  onDelete={async () => {
+                    const label = movementLabel(movement)
+                    const accepted = await confirm({
+                      title: 'Удалить операцию?',
+                      message: `${label} будет удалена из копилки.`,
+                    })
+                    if (accepted) {
+                      void deleteDeposit.mutateAsync(movement.id)
+                    }
+                  }}
+                />
+              ))}
+            </ul>
+          </Card>
+        </section>
+      )}
+
       <section className="space-y-3">
         <h2 className="text-lg font-semibold text-slate-900">Цели</h2>
 
@@ -348,5 +379,54 @@ export function SavingsPage() {
         </section>
       )}
     </div>
+  )
+}
+
+function movementLabel(movement: SavingsMovement): string {
+  const sign = movement.amount >= 0 ? '+' : ''
+  return `${sign}${formatMoney(movement.amount, movement.currency)}`
+}
+
+function MovementRow({
+  movement,
+  canDelete,
+  deleting,
+  onDelete,
+}: {
+  movement: SavingsMovement
+  canDelete: boolean
+  deleting: boolean
+  onDelete: () => void | Promise<void>
+}) {
+  const isDeposit = movement.amount >= 0
+
+  return (
+    <li className="flex items-center justify-between gap-3 px-5 py-3">
+      <div className="min-w-0">
+        <p
+          className={`font-semibold tabular-nums ${
+            isDeposit ? 'text-emerald-700' : 'text-red-700'
+          }`}
+        >
+          {movementLabel(movement)}
+        </p>
+        <p className="mt-0.5 text-sm text-slate-500">
+          {formatDateTime(movement.createdAt)}
+          {movement.periodLabel ? ` · ${movement.periodLabel}` : ''}
+          {movement.createdByName ? ` · ${movement.createdByName}` : ''}
+        </p>
+      </div>
+      {canDelete && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="shrink-0 text-red-600 hover:bg-red-50"
+          loading={deleting}
+          onClick={() => void onDelete()}
+        >
+          Удалить
+        </Button>
+      )}
+    </li>
   )
 }

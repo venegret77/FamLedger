@@ -247,11 +247,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.ToTable("period_reconciliations");
             e.HasKey(x => x.Id);
             e.HasIndex(x => new { x.ContextId, x.PeriodId }).IsUnique();
-            e.Property(x => x.CardsJson).HasColumnType("jsonb");
-            e.Property(x => x.CashJson).HasColumnType("jsonb");
-            e.Property(x => x.SetAsideJson).HasColumnType("jsonb");
-            e.Property(x => x.ManualPlannedJson).HasColumnType("jsonb");
-            e.Property(x => x.SavingsPlanJson).HasColumnType("jsonb");
+            e.Property(x => x.AssetItemsJson).HasColumnType("jsonb");
+            e.Property(x => x.ObligationItemsJson).HasColumnType("jsonb");
             e.HasOne(x => x.Context).WithMany().HasForeignKey(x => x.ContextId);
             e.HasOne(x => x.Period).WithMany().HasForeignKey(x => x.PeriodId);
         });

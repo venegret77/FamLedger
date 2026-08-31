@@ -602,6 +602,20 @@ export function useWithdrawSavings() {
   })
 }
 
+export function useDeleteSavingsDeposit() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (depositId: string) =>
+      apiFetch<void>(`/api/savings/deposits/${depositId}`, { method: 'DELETE' }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.savings }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.reconciliation }),
+      ])
+    },
+  })
+}
+
 export function useSetSavingsPlan() {
   const queryClient = useQueryClient()
   return useMutation({
