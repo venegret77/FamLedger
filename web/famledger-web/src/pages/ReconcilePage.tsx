@@ -162,25 +162,13 @@ export function ReconcilePage() {
 
       <Card className="border-emerald-200/80 bg-gradient-to-br from-emerald-50/80 to-white">
         <CardTitle>Итог</CardTitle>
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <SummaryItem
-            label="Доходы (учёт)"
-            amount={data.summary.ledgerIncome}
-            currency={baseCurrency}
-          />
-          <SummaryItem
-            label="Расходы (учёт)"
-            amount={-data.summary.ledgerExpenses}
-            currency={baseCurrency}
-          />
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <SummaryItem
             label="По учёту"
             amount={data.summary.ledgerTotal}
             currency={baseCurrency}
             accent
           />
-        </div>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <SummaryItem
             label="Активы"
             amount={data.summary.assetTotal}
