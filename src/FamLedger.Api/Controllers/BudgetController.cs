@@ -704,6 +704,8 @@ public class BudgetController(
             view.Summary.LedgerIncome,
             view.Summary.LedgerExpenses,
             view.Summary.LedgerTotal,
+            view.Summary.AssetTotal,
+            view.Summary.ObligationTotal,
             view.Summary.ActualTotal,
             view.Summary.Difference
         },

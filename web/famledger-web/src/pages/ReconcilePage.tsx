@@ -122,7 +122,7 @@ export function ReconcilePage() {
           autoLines={data.assets.lines.filter((line) => !line.isManual)}
           manualItems={manual.assetItems}
           totals={assetTotals}
-          totalBase={data.assets.totalBase}
+          totalBase={data.summary.assetTotal}
           baseCurrency={baseCurrency}
           canEdit={data.canEdit}
           addLabel="Добавить актив"
@@ -143,7 +143,7 @@ export function ReconcilePage() {
           autoLines={data.obligations.lines.filter((line) => !line.isManual)}
           manualItems={manual.obligationItems}
           totals={obligationTotals}
-          totalBase={data.obligations.totalBase}
+          totalBase={data.summary.obligationTotal}
           baseCurrency={baseCurrency}
           canEdit={data.canEdit}
           addLabel="Добавить обязательство"
@@ -162,7 +162,7 @@ export function ReconcilePage() {
 
       <Card className="border-emerald-200/80 bg-gradient-to-br from-emerald-50/80 to-white">
         <CardTitle>Итог</CardTitle>
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <SummaryItem
             label="Доходы (учёт)"
             amount={data.summary.ledgerIncome}
@@ -179,14 +179,28 @@ export function ReconcilePage() {
             currency={baseCurrency}
             accent
           />
+        </div>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <SummaryItem
-            label="По факту"
+            label="Активы"
+            amount={data.summary.assetTotal}
+            currency={baseCurrency}
+          />
+          <SummaryItem
+            label="Обязательства"
+            amount={data.summary.obligationTotal}
+            currency={baseCurrency}
+          />
+          <SummaryItem
+            label="Активы − обязательства"
             amount={data.summary.actualTotal}
             currency={baseCurrency}
             accent
           />
+        </div>
+        <div className="mt-3">
           <SummaryItem
-            label="Разница"
+            label="Разница с учётом"
             amount={data.summary.difference}
             currency={baseCurrency}
             accent
@@ -201,8 +215,8 @@ export function ReconcilePage() {
           />
         </div>
         <p className="mt-4 text-sm text-slate-600">
-          По факту = активы − обязательства (в {baseCurrency} по текущему курсу). Разница = по учёту − по
-          факту.
+          Активы − обязательства (в {baseCurrency} по текущему курсу). Разница с учётом = по учёту − (активы
+          − обязательства).
         </p>
       </Card>
     </div>

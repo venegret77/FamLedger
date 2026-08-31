@@ -24,6 +24,8 @@ public record ReconciliationSummary(
     decimal LedgerIncome,
     decimal LedgerExpenses,
     decimal LedgerTotal,
+    decimal AssetTotal,
+    decimal ObligationTotal,
     decimal ActualTotal,
     decimal Difference);
 

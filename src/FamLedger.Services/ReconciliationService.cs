@@ -106,34 +106,31 @@ public class ReconciliationService(
 
         var debtsOwedToUs = await GetDebtsByCurrencyAsync(context.Id, DebtDirection.TheyOwe, ct);
         var debtsWeOwe = await GetDebtsByCurrencyAsync(context.Id, DebtDirection.WeOwe, ct);
-        var unpaidPlanned = await GetUnpaidPlannedByCurrencyAsync(period.Id, ct);
+        var unpaidPlannedLines = await GetUnpaidPlannedLinesAsync(period.Id, ct);
 
-        var manualAssets = ReconciliationItemsHelper.ToCurrencyTotals(manual.AssetItems);
-        var manualObligations = ReconciliationItemsHelper.ToCurrencyTotals(manual.ObligationItems);
-
-        var assetLines = new List<ReconciliationLine>
-        {
-            AutoLine("debtsOwedToUs", "Долги (нам должны)", debtsOwedToUs),
-        };
+        var assetLines = new List<ReconciliationLine>();
+        if (debtsOwedToUs.Count > 0)
+            assetLines.Add(AutoLine("debtsOwedToUs", "Долги (нам должны)", debtsOwedToUs));
         assetLines.AddRange(manual.AssetItems.Select(ManualEntryLine));
 
-        var obligationLines = new List<ReconciliationLine>
-        {
-            AutoLine("unpaidPlanned", "Плановые расходы (не оплачены)", unpaidPlanned),
-            AutoLine("debtsWeOwe", "Долги (мы должны)", debtsWeOwe),
-        };
+        var obligationLines = new List<ReconciliationLine>();
+        obligationLines.AddRange(unpaidPlannedLines);
+        if (debtsWeOwe.Count > 0)
+            obligationLines.Add(AutoLine("debtsWeOwe", "Долги (мы должны)", debtsWeOwe));
         obligationLines.AddRange(manual.ObligationItems.Select(ManualEntryLine));
 
         var assetTotals = CurrencyAmountHelper.MergeAmounts(
-            manualAssets,
-            debtsOwedToUs);
+            debtsOwedToUs,
+            ReconciliationItemsHelper.ToCurrencyTotals(manual.AssetItems));
         var obligationTotals = CurrencyAmountHelper.MergeAmounts(
-            unpaidPlanned,
-            manualObligations,
+            LinesToCurrencyTotals(unpaidPlannedLines),
+            ReconciliationItemsHelper.ToCurrencyTotals(manual.ObligationItems),
             debtsWeOwe);
 
-        var assetTotalBase = await SumToBaseAsync(context, period.Id, assetTotals, ct);
-        var obligationTotalBase = await SumToBaseAsync(context, period.Id, obligationTotals, ct);
+        var assetTotalBase = await SumAmountsToBaseAsync(
+            context, period.Id, ToAmountPairs(assetLines), ct);
+        var obligationTotalBase = await SumAmountsToBaseAsync(
+            context, period.Id, ToAmountPairs(obligationLines), ct);
         var actualNet = assetTotalBase - obligationTotalBase;
 
         var ledgerIncome = summary.Income + summary.TopUps;
@@ -157,6 +154,8 @@ public class ReconciliationService(
                 ledgerIncome,
                 ledgerExpenses,
                 ledgerTotal,
+                assetTotalBase,
+                obligationTotalBase,
                 actualNet,
                 ledgerTotal - actualNet),
             manual);
@@ -179,6 +178,61 @@ public class ReconciliationService(
     private static ReconciliationManualInput EmptyManual() =>
         new([], []);
 
+    private static bool IsSavingsPlanExpense(string name) =>
+        name.Contains("копилк", StringComparison.OrdinalIgnoreCase)
+        || name.Contains("kopilk", StringComparison.OrdinalIgnoreCase);
+
+    private static Dictionary<string, decimal> LinesToCurrencyTotals(IEnumerable<ReconciliationLine> lines)
+    {
+        var result = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+        foreach (var line in lines)
+        {
+            foreach (var amount in line.Amounts)
+            {
+                if (amount.Amount == 0) continue;
+                result[amount.Currency] = result.GetValueOrDefault(amount.Currency) + amount.Amount;
+            }
+        }
+
+        return result;
+    }
+
+    private static IEnumerable<(decimal Amount, string Currency)> ToAmountPairs(IEnumerable<ReconciliationLine> lines) =>
+        lines.SelectMany(l => l.Amounts.Select(a => (a.Amount, a.Currency)));
+
+    private async Task<IReadOnlyList<ReconciliationLine>> GetUnpaidPlannedLinesAsync(
+        Guid periodId,
+        CancellationToken ct)
+    {
+        var lines = new List<ReconciliationLine>();
+
+        var recurring = await recurringService.GetPeriodItemsAsync(periodId, ct);
+        foreach (var item in recurring.Where(i => !i.IsSkipped && !i.IsPaid))
+        {
+            var expense = item.RecurringExpense;
+            if (IsSavingsPlanExpense(expense.Name))
+                continue;
+
+            lines.Add(new ReconciliationLine(
+                $"unpaid-recurring-{item.Id}",
+                expense.Name,
+                false,
+                [new CurrencyAmount(expense.DefinitionCurrency.ToUpperInvariant(), expense.DefinitionAmount)]));
+        }
+
+        var oneOff = await oneOffService.GetByPeriodAsync(periodId, ct);
+        foreach (var item in oneOff.Where(i => !i.IsPaid))
+        {
+            lines.Add(new ReconciliationLine(
+                $"unpaid-oneoff-{item.Id}",
+                item.Name,
+                false,
+                [new CurrencyAmount(item.Currency.ToUpperInvariant(), item.Amount)]));
+        }
+
+        return lines;
+    }
+
     private async Task<Dictionary<string, decimal>> GetDebtsByCurrencyAsync(
         Guid contextId,
         DebtDirection direction,
@@ -199,38 +253,15 @@ public class ReconciliationService(
         return result;
     }
 
-    private async Task<Dictionary<string, decimal>> GetUnpaidPlannedByCurrencyAsync(
-        Guid periodId,
-        CancellationToken ct)
-    {
-        var result = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
-
-        var recurring = await recurringService.GetPeriodItemsAsync(periodId, ct);
-        foreach (var item in recurring.Where(i => !i.IsSkipped && !i.IsPaid))
-        {
-            var currency = item.RecurringExpense.DefinitionCurrency.ToUpperInvariant();
-            result[currency] = result.GetValueOrDefault(currency) + item.RecurringExpense.DefinitionAmount;
-        }
-
-        var oneOff = await oneOffService.GetByPeriodAsync(periodId, ct);
-        foreach (var item in oneOff.Where(i => !i.IsPaid))
-        {
-            var currency = item.Currency.ToUpperInvariant();
-            result[currency] = result.GetValueOrDefault(currency) + item.Amount;
-        }
-
-        return result;
-    }
-
-    private async Task<decimal> SumToBaseAsync(
+    private async Task<decimal> SumAmountsToBaseAsync(
         BudgetContext context,
         Guid periodId,
-        IReadOnlyDictionary<string, decimal> amounts,
+        IEnumerable<(decimal Amount, string Currency)> amounts,
         CancellationToken ct)
     {
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         decimal total = 0;
-        foreach (var (currency, amount) in amounts)
+        foreach (var (amount, currency) in amounts)
         {
             if (amount == 0) continue;
             total += currency.Equals(context.BaseCurrency, StringComparison.OrdinalIgnoreCase)

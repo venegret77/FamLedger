@@ -340,6 +340,8 @@ export interface ReconciliationSummary {
   ledgerIncome: number
   ledgerExpenses: number
   ledgerTotal: number
+  assetTotal: number
+  obligationTotal: number
   actualTotal: number
   difference: number
 }
