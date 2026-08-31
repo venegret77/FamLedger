@@ -16,6 +16,8 @@ import type {
   RecurringExpense,
   Reminder,
   ReminderAudience,
+  ReconciliationManualInput,
+  ReconciliationView,
   SavingsResponse,
   StartNewPeriodResponse,
   Transaction,
@@ -38,6 +40,7 @@ export const queryKeys = {
   categories: ['categories'] as const,
   contexts: ['contexts'] as const,
   reminders: ['reminders'] as const,
+  reconciliation: ['reconciliation'] as const,
 }
 
 export function useMe() {
@@ -754,6 +757,28 @@ export function usePermissions() {
     canManageFamilySettings: settings?.canManageFamilySettings ?? true,
     myRole: settings?.myRole ?? 'Head',
   }
+}
+
+export function useReconciliation() {
+  return useQuery({
+    queryKey: queryKeys.reconciliation,
+    queryFn: () => apiFetch<ReconciliationView>('/api/reconciliation'),
+  })
+}
+
+export function useSaveReconciliation() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (manual: ReconciliationManualInput) =>
+      apiFetch<ReconciliationView>('/api/reconciliation', {
+        method: 'PUT',
+        body: manual,
+      }),
+    onSuccess: (data) => {
+      queryClient.setQueryData(queryKeys.reconciliation, data)
+    },
+  })
 }
 
 export function useReminders() {

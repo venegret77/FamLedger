@@ -28,6 +28,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<NotificationSubscription> NotificationSubscriptions => Set<NotificationSubscription>();
     public DbSet<WebhookEndpoint> WebhookEndpoints => Set<WebhookEndpoint>();
     public DbSet<Reminder> Reminders => Set<Reminder>();
+    public DbSet<PeriodReconciliation> PeriodReconciliations => Set<PeriodReconciliation>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -239,6 +240,19 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.Message).HasMaxLength(1000);
             e.HasOne(x => x.Context).WithMany(x => x.Reminders).HasForeignKey(x => x.ContextId);
             e.HasOne(x => x.CreatedByUser).WithMany().HasForeignKey(x => x.CreatedByUserId);
+        });
+
+        modelBuilder.Entity<PeriodReconciliation>(e =>
+        {
+            e.ToTable("period_reconciliations");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.ContextId, x.PeriodId }).IsUnique();
+            e.Property(x => x.CardsJson).HasColumnType("jsonb");
+            e.Property(x => x.CashJson).HasColumnType("jsonb");
+            e.Property(x => x.SetAsideJson).HasColumnType("jsonb");
+            e.Property(x => x.ManualPlannedJson).HasColumnType("jsonb");
+            e.HasOne(x => x.Context).WithMany().HasForeignKey(x => x.ContextId);
+            e.HasOne(x => x.Period).WithMany().HasForeignKey(x => x.PeriodId);
         });
     }
 }

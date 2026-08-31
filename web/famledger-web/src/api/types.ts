@@ -305,3 +305,47 @@ export interface StartNewPeriodResponse {
   startDate: string
   endDate: string
 }
+
+export interface ReconciliationAmount {
+  currency: string
+  amount: number
+}
+
+export interface ReconciliationLine {
+  key: string
+  label: string
+  isManual: boolean
+  amounts: ReconciliationAmount[]
+}
+
+export interface ReconciliationSide {
+  lines: ReconciliationLine[]
+  totals: ReconciliationAmount[]
+  totalBase: number
+}
+
+export interface ReconciliationSummary {
+  ledgerIncome: number
+  ledgerExpenses: number
+  ledgerTotal: number
+  actualTotal: number
+  difference: number
+}
+
+export interface ReconciliationManualInput {
+  cards: Record<string, number>
+  cash: Record<string, number>
+  setAside: Record<string, number>
+  manualPlanned: Record<string, number>
+}
+
+export interface ReconciliationView {
+  periodId: string
+  periodLabel: string
+  baseCurrency: string
+  canEdit: boolean
+  assets: ReconciliationSide
+  obligations: ReconciliationSide
+  summary: ReconciliationSummary
+  manual: ReconciliationManualInput
+}

@@ -24,7 +24,8 @@ public class BudgetController(
     ISavingsService savingsService,
     IGoalService goalService,
     IExchangeRateService exchangeRateService,
-    IBudgetAlertService budgetAlertService) : ControllerBase
+    IBudgetAlertService budgetAlertService,
+    IReconciliationService reconciliationService) : ControllerBase
 {
     private async Task<(Domain.Entities.BudgetContext Context, Domain.Entities.BudgetPeriod Period)> GetActiveContextAsync(CancellationToken ct)
     {
@@ -613,4 +614,77 @@ public class BudgetController(
         await goalService.DeleteAsync(goalId, User.GetUserId(), ct);
         return Ok();
     }
+
+    [HttpGet("reconciliation")]
+    public async Task<IActionResult> Reconciliation(CancellationToken ct)
+    {
+        var (context, period) = await GetActiveContextAsync(ct);
+        var view = await reconciliationService.GetAsync(context.Id, period.Id, User.GetUserId(), ct);
+        return Ok(ToReconciliationResponse(view));
+    }
+
+    public record ReconciliationManualRequest(
+        Dictionary<string, decimal>? Cards,
+        Dictionary<string, decimal>? Cash,
+        Dictionary<string, decimal>? SetAside,
+        Dictionary<string, decimal>? ManualPlanned);
+
+    [HttpPut("reconciliation")]
+    public async Task<IActionResult> SaveReconciliation([FromBody] ReconciliationManualRequest request, CancellationToken ct)
+    {
+        var (context, period) = await GetActiveContextAsync(ct);
+        try
+        {
+            var manual = new Domain.Models.ReconciliationManualInput(
+                request.Cards ?? [],
+                request.Cash ?? [],
+                request.SetAside ?? [],
+                request.ManualPlanned ?? []);
+            var view = await reconciliationService.SaveManualAsync(
+                context.Id, period.Id, User.GetUserId(), manual, ct);
+            return Ok(ToReconciliationResponse(view));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+    }
+
+    private static object ToReconciliationResponse(Domain.Models.ReconciliationView view) => new
+    {
+        view.PeriodId,
+        view.PeriodLabel,
+        baseCurrency = view.BaseCurrency,
+        view.CanEdit,
+        assets = ToSide(view.Assets),
+        obligations = ToSide(view.Obligations),
+        summary = new
+        {
+            view.Summary.LedgerIncome,
+            view.Summary.LedgerExpenses,
+            view.Summary.LedgerTotal,
+            view.Summary.ActualTotal,
+            view.Summary.Difference
+        },
+        manual = new
+        {
+            cards = view.Manual.Cards,
+            cash = view.Manual.Cash,
+            setAside = view.Manual.SetAside,
+            manualPlanned = view.Manual.ManualPlanned
+        }
+    };
+
+    private static object ToSide(Domain.Models.ReconciliationSide side) => new
+    {
+        lines = side.Lines.Select(l => new
+        {
+            l.Key,
+            l.Label,
+            l.IsManual,
+            amounts = l.Amounts.Select(a => new { currency = a.Currency, amount = a.Amount })
+        }),
+        totals = side.Totals.Select(a => new { currency = a.Currency, amount = a.Amount }),
+        totalBase = side.TotalBase
+    };
 }

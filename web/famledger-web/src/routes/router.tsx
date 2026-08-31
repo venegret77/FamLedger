@@ -7,6 +7,7 @@ import { FamilyPage } from '../pages/FamilyPage'
 import { HistoryPage } from '../pages/HistoryPage'
 import { LoginPage } from '../pages/LoginPage'
 import { PlanPage } from '../pages/PlanPage'
+import { ReconcilePage } from '../pages/ReconcilePage'
 import { RemindersPage } from '../pages/RemindersPage'
 import { SavingsPage } from '../pages/SavingsPage'
 import { SettingsPage } from '../pages/SettingsPage'
@@ -26,6 +27,7 @@ export const router = createBrowserRouter([
         children: [
           { index: true, element: <DashboardPage /> },
           { path: 'plan', element: <PlanPage /> },
+          { path: 'reconcile', element: <ReconcilePage /> },
           { path: 'savings', element: <SavingsPage /> },
           { path: 'debts', element: <DebtsPage /> },
           { path: 'transactions', element: <TransactionsPage /> },
