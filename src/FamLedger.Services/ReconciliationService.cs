@@ -178,10 +178,6 @@ public class ReconciliationService(
     private static ReconciliationManualInput EmptyManual() =>
         new([], []);
 
-    private static bool IsSavingsPlanExpense(string name) =>
-        name.Contains("копилк", StringComparison.OrdinalIgnoreCase)
-        || name.Contains("kopilk", StringComparison.OrdinalIgnoreCase);
-
     private static Dictionary<string, decimal> LinesToCurrencyTotals(IEnumerable<ReconciliationLine> lines)
     {
         var result = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
@@ -210,9 +206,6 @@ public class ReconciliationService(
         foreach (var item in recurring.Where(i => !i.IsSkipped && !i.IsPaid))
         {
             var expense = item.RecurringExpense;
-            if (IsSavingsPlanExpense(expense.Name))
-                continue;
-
             lines.Add(new ReconciliationLine(
                 $"unpaid-recurring-{item.Id}",
                 expense.Name,

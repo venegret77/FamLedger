@@ -147,7 +147,7 @@ export function ReconcilePage() {
           baseCurrency={baseCurrency}
           canEdit={data.canEdit}
           addLabel="Добавить обязательство"
-          namePlaceholder="Копилка план, резерв…"
+          namePlaceholder="Копилка, резерв…"
           onAdd={(entry) => void addItem('obligationItems', entry)}
           onRemove={async (id) => {
             const accepted = await confirm({
