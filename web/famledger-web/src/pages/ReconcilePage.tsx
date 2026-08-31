@@ -43,12 +43,11 @@ export function ReconcilePage() {
 
   const baseCurrency = data?.baseCurrency ?? settings?.baseCurrency ?? 'RSD'
 
-  const differenceTone = useMemo(() => {
-    if (!data) return 'neutral'
-    const diff = Math.abs(data.summary.difference)
-    if (diff < 1) return 'ok'
-    if (diff < 1000) return 'warn'
-    return 'bad'
+  const factVsLedgerTone = useMemo(() => {
+    if (!data) return 'neutral' as const
+    const gap = data.summary.actualTotal - data.summary.ledgerTotal
+    if (Math.abs(gap) < 1) return 'neutral' as const
+    return gap > 0 ? ('ok' as const) : ('bad' as const)
   }, [data])
 
   async function addItem(side: ManualSide, entry: ReconciliationManualEntry) {
@@ -162,13 +161,7 @@ export function ReconcilePage() {
 
       <Card className="border-emerald-200/80 bg-gradient-to-br from-emerald-50/80 to-white">
         <CardTitle>Итог</CardTitle>
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <SummaryItem
-            label="По учёту"
-            amount={data.summary.ledgerTotal}
-            currency={baseCurrency}
-            accent
-          />
+        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
           <SummaryItem
             label="Активы"
             amount={data.summary.assetTotal}
@@ -180,32 +173,23 @@ export function ReconcilePage() {
             currency={baseCurrency}
           />
           <SummaryItem
-            label="Активы − обязательства"
+            label="По учёту"
+            amount={data.summary.ledgerTotal}
+            currency={baseCurrency}
+          />
+          <SummaryItem
+            label="По факту"
             amount={data.summary.actualTotal}
             currency={baseCurrency}
-            accent
+            tone={factVsLedgerTone}
           />
-        </div>
-        <div className="mt-3">
           <SummaryItem
-            label="Разница с учётом"
+            label="Разница"
             amount={data.summary.difference}
             currency={baseCurrency}
-            accent
-            tone={differenceTone}
-            hint={
-              Math.abs(data.summary.difference) < 1
-                ? 'Сходится'
-                : data.summary.difference > 0
-                  ? 'В учёте больше, чем по факту'
-                  : 'По факту больше, чем в учёте'
-            }
+            tone={factVsLedgerTone}
           />
         </div>
-        <p className="mt-4 text-sm text-slate-600">
-          Активы − обязательства (в {baseCurrency} по текущему курсу). Разница с учётом = по учёту − (активы
-          − обязательства).
-        </p>
       </Card>
     </div>
   )
@@ -403,35 +387,33 @@ function SummaryItem({
   label,
   amount,
   currency,
-  accent,
   tone = 'neutral',
-  hint,
 }: {
   label: string
   amount: number
   currency: string
-  accent?: boolean
-  tone?: 'neutral' | 'ok' | 'warn' | 'bad'
-  hint?: string
+  tone?: 'neutral' | 'ok' | 'bad'
 }) {
-  const toneClass =
+  const boxClass =
+    tone === 'ok'
+      ? 'border-emerald-200 bg-emerald-50'
+      : tone === 'bad'
+        ? 'border-red-200 bg-red-50'
+        : 'border-slate-200/80 bg-white'
+
+  const amountClass =
     tone === 'ok'
       ? 'text-emerald-700'
-      : tone === 'warn'
-        ? 'text-amber-700'
-        : tone === 'bad'
-          ? 'text-red-700'
-          : accent
-            ? 'text-slate-900'
-            : 'text-slate-700'
+      : tone === 'bad'
+        ? 'text-red-700'
+        : 'text-slate-900'
 
   return (
-    <div className="rounded-xl border border-slate-200/80 bg-white px-4 py-3">
+    <div className={`rounded-xl border px-4 py-3 ${boxClass}`}>
       <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p>
-      <p className={`mt-1 text-lg font-bold tabular-nums ${toneClass}`}>
+      <p className={`mt-1 text-lg font-bold tabular-nums ${amountClass}`}>
         {formatMoney(amount, currency)}
       </p>
-      {hint && <p className="mt-1 text-xs text-slate-500">{hint}</p>}
     </div>
   )
 }
