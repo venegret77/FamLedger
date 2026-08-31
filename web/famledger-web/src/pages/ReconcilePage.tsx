@@ -14,10 +14,11 @@ const manualFieldByLineKey: Record<string, ManualField> = {
   cash: 'cash',
   setAside: 'setAside',
   manualPlanned: 'manualPlanned',
+  savingsPlan: 'savingsPlan',
 }
 
 function emptyManual(): ReconciliationManualInput {
-  return { cards: {}, cash: {}, setAside: {}, manualPlanned: {} }
+  return { cards: {}, cash: {}, setAside: {}, manualPlanned: {}, savingsPlan: {} }
 }
 
 function formatAmounts(amounts: { currency: string; amount: number }[]): string {

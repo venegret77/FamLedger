@@ -627,7 +627,8 @@ public class BudgetController(
         Dictionary<string, decimal>? Cards,
         Dictionary<string, decimal>? Cash,
         Dictionary<string, decimal>? SetAside,
-        Dictionary<string, decimal>? ManualPlanned);
+        Dictionary<string, decimal>? ManualPlanned,
+        Dictionary<string, decimal>? SavingsPlan);
 
     [HttpPut("reconciliation")]
     public async Task<IActionResult> SaveReconciliation([FromBody] ReconciliationManualRequest request, CancellationToken ct)
@@ -639,7 +640,8 @@ public class BudgetController(
                 request.Cards ?? [],
                 request.Cash ?? [],
                 request.SetAside ?? [],
-                request.ManualPlanned ?? []);
+                request.ManualPlanned ?? [],
+                request.SavingsPlan ?? []);
             var view = await reconciliationService.SaveManualAsync(
                 context.Id, period.Id, User.GetUserId(), manual, ct);
             return Ok(ToReconciliationResponse(view));
@@ -671,7 +673,8 @@ public class BudgetController(
             cards = view.Manual.Cards,
             cash = view.Manual.Cash,
             setAside = view.Manual.SetAside,
-            manualPlanned = view.Manual.ManualPlanned
+            manualPlanned = view.Manual.ManualPlanned,
+            savingsPlan = view.Manual.SavingsPlan
         }
     };
 

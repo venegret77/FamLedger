@@ -337,6 +337,7 @@ export interface ReconciliationManualInput {
   cash: Record<string, number>
   setAside: Record<string, number>
   manualPlanned: Record<string, number>
+  savingsPlan: Record<string, number>
 }
 
 export interface ReconciliationView {

@@ -34,4 +34,5 @@ public record ReconciliationManualInput(
     IReadOnlyDictionary<string, decimal> Cards,
     IReadOnlyDictionary<string, decimal> Cash,
     IReadOnlyDictionary<string, decimal> SetAside,
-    IReadOnlyDictionary<string, decimal> ManualPlanned);
+    IReadOnlyDictionary<string, decimal> ManualPlanned,
+    IReadOnlyDictionary<string, decimal> SavingsPlan);

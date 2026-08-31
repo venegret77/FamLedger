@@ -12,7 +12,6 @@ public class ReconciliationService(
     AppDbContext db,
     IContextService contextService,
     IBudgetCalculatorService calculator,
-    ISavingsService savingsService,
     IDebtService debtService,
     IRecurringExpenseService recurringService,
     IOneOffExpenseService oneOffService,
@@ -57,6 +56,7 @@ public class ReconciliationService(
         entity.CashJson = CurrencyAmountHelper.ToJson(manual.Cash);
         entity.SetAsideJson = CurrencyAmountHelper.ToJson(manual.SetAside);
         entity.ManualPlannedJson = CurrencyAmountHelper.ToJson(manual.ManualPlanned);
+        entity.SavingsPlanJson = CurrencyAmountHelper.ToJson(manual.SavingsPlan);
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedByUserId = userId;
         await db.SaveChangesAsync(ct);
@@ -96,7 +96,8 @@ public class ReconciliationService(
             CurrencyAmountHelper.ParseJson(entity.CardsJson),
             CurrencyAmountHelper.ParseJson(entity.CashJson),
             CurrencyAmountHelper.ParseJson(entity.SetAsideJson),
-            CurrencyAmountHelper.ParseJson(entity.ManualPlannedJson));
+            CurrencyAmountHelper.ParseJson(entity.ManualPlannedJson),
+            CurrencyAmountHelper.ParseJson(entity.SavingsPlanJson));
     }
 
     private async Task<ReconciliationView> BuildViewAsync(
@@ -110,7 +111,6 @@ public class ReconciliationService(
         var summary = await calculator.CalculateAsync(context, period, today, ct);
 
         var savingsActual = await GetSavingsActualByCurrencyAsync(context.Id, ct);
-        var savingsPlan = await GetSavingsPlanByCurrencyAsync(context.Id, period.Id, ct);
         var debtsOwedToUs = await GetDebtsByCurrencyAsync(context.Id, DebtDirection.TheyOwe, ct);
         var debtsWeOwe = await GetDebtsByCurrencyAsync(context.Id, DebtDirection.WeOwe, ct);
         var unpaidPlanned = await GetUnpaidPlannedByCurrencyAsync(period.Id, ct);
@@ -126,7 +126,7 @@ public class ReconciliationService(
 
         var obligationLines = new List<ReconciliationLine>
         {
-            Line("savingsPlan", "Копилка (план)", false, savingsPlan),
+            Line("savingsPlan", "Копилка (план)", true, manual.SavingsPlan),
             Line("unpaidPlanned", "Плановые расходы (не оплачены)", false, unpaidPlanned),
             Line("manualPlanned", "Плановые вручную", true, manual.ManualPlanned),
             Line("debtsWeOwe", "Долги (мы должны)", false, debtsWeOwe)
@@ -139,7 +139,7 @@ public class ReconciliationService(
             manual.SetAside,
             debtsOwedToUs);
         var obligationTotals = CurrencyAmountHelper.MergeAmounts(
-            savingsPlan,
+            manual.SavingsPlan,
             unpaidPlanned,
             manual.ManualPlanned,
             debtsWeOwe);
@@ -186,6 +186,7 @@ public class ReconciliationService(
             new Dictionary<string, decimal>(),
             new Dictionary<string, decimal>(),
             new Dictionary<string, decimal>(),
+            new Dictionary<string, decimal>(),
             new Dictionary<string, decimal>());
 
     private async Task<Dictionary<string, decimal>> GetSavingsActualByCurrencyAsync(
@@ -200,24 +201,6 @@ public class ReconciliationService(
         return deposits
             .GroupBy(d => d.Currency.ToUpperInvariant())
             .ToDictionary(g => g.Key, g => g.Sum(x => x.Amount), StringComparer.OrdinalIgnoreCase);
-    }
-
-    private async Task<Dictionary<string, decimal>> GetSavingsPlanByCurrencyAsync(
-        Guid contextId,
-        Guid periodId,
-        CancellationToken ct)
-    {
-        var entry = await savingsService.GetOrCreateForPeriodAsync(contextId, periodId, ct);
-        if (entry.PlannedAmount == 0)
-            return new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
-
-        var currency = string.IsNullOrWhiteSpace(entry.PlannedCurrency)
-            ? entry.Currency
-            : entry.PlannedCurrency;
-        return new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase)
-        {
-            [currency.ToUpperInvariant()] = entry.PlannedAmount
-        };
     }
 
     private async Task<Dictionary<string, decimal>> GetDebtsByCurrencyAsync(
