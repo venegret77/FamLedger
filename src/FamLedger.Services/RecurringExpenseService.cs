@@ -134,25 +134,4 @@ public class RecurringExpenseService(
 
         await db.SaveChangesAsync(ct);
     }
-
-    public async Task AutoMarkDueItemsAsync(CancellationToken ct = default)
-    {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        if (today.Day > 28) return;
-
-        var items = await db.PeriodRecurringItems
-            .Include(i => i.RecurringExpense)
-            .Include(i => i.Period)
-            .Where(i => !i.IsPaid && !i.IsSkipped && !i.Period.IsClosed &&
-                        i.RecurringExpense.ChargeDayOfMonth == today.Day &&
-                        i.Period.StartDate <= today && i.Period.EndDate >= today)
-            .ToListAsync(ct);
-
-        foreach (var item in items)
-        {
-            item.IsPaid = true;
-            item.PaidAt = DateTime.UtcNow;
-        }
-        await db.SaveChangesAsync(ct);
-    }
 }

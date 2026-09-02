@@ -58,7 +58,6 @@ public interface IRecurringExpenseService
     Task ToggleSkippedAsync(Guid itemId, Guid userId, CancellationToken ct = default);
     Task DeleteAsync(Guid id, Guid userId, CancellationToken ct = default);
     Task UpdateAsync(Guid id, Guid userId, string name, decimal amount, string currency, int chargeDay, CancellationToken ct = default);
-    Task AutoMarkDueItemsAsync(CancellationToken ct = default);
 }
 
 public interface IOneOffExpenseService

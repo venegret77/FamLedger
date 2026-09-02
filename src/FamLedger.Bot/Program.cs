@@ -20,7 +20,7 @@ builder.Services.AddSingleton<TelegramBot>();
 
 builder.Services.AddHostedService<TelegramWorker>();
 // Periods close only via "Начать новый месяц" — no automatic rollover.
-builder.Services.AddHostedService<RecurringChargeWorker>();
+// Planned recurring items stay unpaid until the user toggles them — no auto-mark on charge day.
 builder.Services.AddHostedService<ExchangeRateWorker>();
 builder.Services.AddHostedService<ReminderWorker>();
 
