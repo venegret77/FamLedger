@@ -408,36 +408,95 @@ public class BudgetController(
     public async Task<IActionResult> Debts([FromQuery] bool hidePaid = false, CancellationToken ct = default)
     {
         var (context, _) = await GetActiveContextAsync(ct);
-        var debts = await debtService.GetByContextAsync(context.Id, hidePaid, ct);
-        return Ok(debts.Select(d =>
-        {
-            var openEntries = d.Entries.Where(e => !e.IsPaid).ToList();
-            var balance = openEntries.Sum(e => e.Amount);
-            var currency = openEntries.FirstOrDefault()?.Currency ?? context.BaseCurrency;
-            var direction = d.Direction == Domain.Enums.DebtDirection.TheyOwe ? "OwedToUs" : "WeOwe";
-            return new
+        var debts = await debtService.GetByContextAsync(context.Id, hidePaid: false, ct);
+
+        var groups = debts
+            .GroupBy(d => d.CounterpartyUserId is Guid userId
+                ? $"user:{userId}"
+                : $"name:{d.CounterpartyName.Trim().ToLowerInvariant()}")
+            .Select(group =>
             {
-                d.Id,
-                d.CounterpartyName,
-                counterpartyUserId = d.CounterpartyUserId,
-                direction,
-                balance,
-                currency,
-                entries = d.Entries.OrderByDescending(e => e.CreatedAt).Select(e => new
+                var legs = group.OrderBy(d => d.Direction).ToList();
+                var first = legs[0];
+                var mappedLegs = legs.Select(d =>
                 {
-                    e.Id,
-                    e.Amount,
-                    e.Currency,
-                    e.Description,
-                    e.IsPaid,
-                    e.CreatedAt
-                })
-            };
-        }));
+                    var openEntries = d.Entries.Where(e => !e.IsPaid).ToList();
+                    var legBalance = openEntries.Sum(e => e.RemainingAmount);
+                    var direction = d.Direction == Domain.Enums.DebtDirection.TheyOwe ? "OwedToUs" : "WeOwe";
+                    return new
+                    {
+                        d.Id,
+                        direction,
+                        balance = legBalance,
+                        currency = openEntries.FirstOrDefault()?.Currency
+                            ?? d.Entries.OrderByDescending(e => e.CreatedAt).FirstOrDefault()?.Currency
+                            ?? context.BaseCurrency,
+                        entries = d.Entries.OrderByDescending(e => e.CreatedAt).Select(e => new
+                        {
+                            e.Id,
+                            e.Amount,
+                            paidAmount = e.PaidAmount,
+                            remainingAmount = e.RemainingAmount,
+                            e.Currency,
+                            e.Description,
+                            e.IsPaid,
+                            e.CreatedAt,
+                            direction
+                        })
+                    };
+                }).ToList();
+
+                var owedToUs = mappedLegs.Where(l => l.direction == "OwedToUs").Sum(l => l.balance);
+                var weOwe = mappedLegs.Where(l => l.direction == "WeOwe").Sum(l => l.balance);
+                var netBalance = owedToUs - weOwe;
+                var hasOwedToUs = owedToUs > 0;
+                var hasWeOwe = weOwe > 0;
+                var hasBothDirections = legs.Any(d => d.Direction == Domain.Enums.DebtDirection.TheyOwe)
+                    && legs.Any(d => d.Direction == Domain.Enums.DebtDirection.WeOwe);
+                var direction = hasOwedToUs && hasWeOwe
+                    ? "Mutual"
+                    : hasOwedToUs
+                        ? "OwedToUs"
+                        : hasWeOwe
+                            ? "WeOwe"
+                            : hasBothDirections
+                                ? "Mutual"
+                                : legs[0].Direction == Domain.Enums.DebtDirection.TheyOwe
+                                    ? "OwedToUs"
+                                    : "WeOwe";
+
+                var currency = mappedLegs
+                    .SelectMany(l => l.entries.Where(e => !e.IsPaid).Select(e => e.Currency))
+                    .FirstOrDefault()
+                    ?? mappedLegs.Select(l => l.currency).FirstOrDefault()
+                    ?? context.BaseCurrency;
+
+                return new
+                {
+                    id = group.Key,
+                    counterpartyName = first.CounterpartyName,
+                    counterpartyUserId = first.CounterpartyUserId,
+                    direction,
+                    owedToUs,
+                    weOwe,
+                    balance = Math.Abs(netBalance),
+                    netBalance,
+                    currency,
+                    legs = mappedLegs,
+                    entries = mappedLegs.SelectMany(l => l.entries).OrderByDescending(e => e.CreatedAt)
+                };
+            })
+            .Where(g => !hidePaid || g.owedToUs > 0 || g.weOwe > 0)
+            .OrderByDescending(g => Math.Abs(g.netBalance))
+            .ThenBy(g => g.counterpartyName)
+            .ToList();
+
+        return Ok(groups);
     }
 
     public record DebtRequest(string CounterpartyName, Guid? CounterpartyUserId, Domain.Enums.DebtDirection Direction);
     public record DebtEntryRequest(decimal Amount, string Currency, string Description);
+    public record DebtPaymentRequest(decimal Amount);
 
     [HttpPost("debts")]
     public async Task<IActionResult> CreateDebt([FromBody] DebtRequest request, CancellationToken ct)
@@ -452,6 +511,16 @@ public class BudgetController(
     {
         var entry = await debtService.AddEntryAsync(debtId, request.Amount, request.Currency, request.Description, ct);
         return Ok(new { entry.Id });
+    }
+
+    [HttpPatch("debts/entries/{entryId:guid}/pay")]
+    public async Task<IActionResult> PayDebtEntry(Guid entryId, [FromBody] DebtPaymentRequest request, CancellationToken ct)
+    {
+        if (request.Amount <= 0)
+            return BadRequest(new { error = "Amount must be positive." });
+
+        await debtService.ApplyEntryPaymentAsync(entryId, request.Amount, ct);
+        return Ok();
     }
 
     [HttpPatch("debts/entries/{entryId:guid}/toggle-paid")]

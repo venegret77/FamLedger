@@ -115,7 +115,7 @@ public class ReminderWorker(IServiceScopeFactory scopeFactory, ILogger<ReminderW
                 var lines = debts.Select(d =>
                 {
                     var open = d.Entries.Where(e => !e.IsPaid).ToList();
-                    var bal = open.Sum(e => e.Amount);
+                    var bal = open.Sum(e => e.RemainingAmount);
                     var cur = open.FirstOrDefault()?.Currency ?? "RSD";
                     var dir = d.Direction == DebtDirection.TheyOwe ? "нам должны" : "мы должны";
                     return $"• {d.CounterpartyName}: {MoneyFormatter.Format(bal, cur)} ({dir})";

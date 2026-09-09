@@ -239,7 +239,7 @@ public class ReconciliationService(
             foreach (var entry in debt.Entries.Where(e => !e.IsPaid))
             {
                 var code = entry.Currency.ToUpperInvariant();
-                result[code] = result.GetValueOrDefault(code) + entry.Amount;
+                result[code] = result.GetValueOrDefault(code) + entry.RemainingAmount;
             }
         }
 

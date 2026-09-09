@@ -558,6 +558,20 @@ export function useToggleDebtPaid() {
   })
 }
 
+export function usePayDebtEntry() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ entryId, amount }: { entryId: string; amount: number }) =>
+      apiFetch<void>(`/api/debts/entries/${entryId}/pay`, {
+        method: 'PATCH',
+        body: { amount },
+      }),
+    onSuccess: () => {
+      void invalidateDebts(queryClient)
+    },
+  })
+}
+
 export function useDeleteDebt() {
   const queryClient = useQueryClient()
   return useMutation({

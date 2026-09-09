@@ -206,6 +206,9 @@ namespace FamLedger.Repository.Migrations
                     b.Property<bool>("IsPaid")
                         .HasColumnType("boolean");
 
+                    b.Property<decimal>("PaidAmount")
+                        .HasColumnType("numeric");
+
                     b.HasKey("Id");
 
                     b.HasIndex("DebtId");

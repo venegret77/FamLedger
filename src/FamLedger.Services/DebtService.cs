@@ -10,16 +10,40 @@ public class DebtService(AppDbContext db) : IDebtService
 {
     public async Task<Debt> CreateAsync(Guid contextId, string counterpartyName, Guid? counterpartyUserId, DebtDirection direction, CancellationToken ct = default)
     {
+        var existing = await FindExistingAsync(contextId, counterpartyName, counterpartyUserId, direction, ct);
+        if (existing is not null)
+            return existing;
+
         var debt = new Debt
         {
             ContextId = contextId,
-            CounterpartyName = counterpartyName,
+            CounterpartyName = counterpartyName.Trim(),
             CounterpartyUserId = counterpartyUserId,
             Direction = direction
         };
         db.Debts.Add(debt);
         await db.SaveChangesAsync(ct);
         return debt;
+    }
+
+    private async Task<Debt?> FindExistingAsync(
+        Guid contextId,
+        string counterpartyName,
+        Guid? counterpartyUserId,
+        DebtDirection direction,
+        CancellationToken ct)
+    {
+        var name = counterpartyName.Trim();
+        var query = db.Debts.Where(d => d.ContextId == contextId && d.Direction == direction);
+
+        if (counterpartyUserId is not null)
+        {
+            return await query.FirstOrDefaultAsync(d => d.CounterpartyUserId == counterpartyUserId, ct);
+        }
+
+        return await query.FirstOrDefaultAsync(
+            d => d.CounterpartyUserId == null && d.CounterpartyName.ToLower() == name.ToLower(),
+            ct);
     }
 
     public async Task<DebtEntry> AddEntryAsync(Guid debtId, decimal amount, string currency, string description, CancellationToken ct = default)
@@ -36,10 +60,20 @@ public class DebtService(AppDbContext db) : IDebtService
         return entry;
     }
 
+    public async Task ApplyEntryPaymentAsync(Guid entryId, decimal amount, CancellationToken ct = default)
+    {
+        var entry = await db.DebtEntries.FindAsync([entryId], ct) ?? throw new InvalidOperationException();
+        entry.ApplyPayment(amount);
+        await db.SaveChangesAsync(ct);
+    }
+
     public async Task ToggleEntryPaidAsync(Guid entryId, CancellationToken ct = default)
     {
         var entry = await db.DebtEntries.FindAsync([entryId], ct) ?? throw new InvalidOperationException();
-        entry.IsPaid = !entry.IsPaid;
+        if (entry.IsPaid || entry.PaidAmount > 0m)
+            entry.ClearPayment();
+        else
+            entry.ApplyPayment(entry.RemainingAmount);
         await db.SaveChangesAsync(ct);
     }
 

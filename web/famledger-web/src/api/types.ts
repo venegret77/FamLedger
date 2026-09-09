@@ -106,19 +106,34 @@ export interface Income {
 export interface DebtEntry {
   id: string
   amount: number
+  paidAmount?: number
+  remainingAmount?: number
   currency: string
   description?: string
   isPaid: boolean
   createdAt: string
+  direction?: DebtDirection
+}
+
+export interface DebtLeg {
+  id: string
+  direction: DebtDirection
+  balance: number
+  currency: string
+  entries: DebtEntry[]
 }
 
 export interface Debt {
   id: string
   counterpartyName: string
   counterpartyUserId?: string
-  direction: DebtDirection
+  direction: DebtDirection | 'Mutual'
+  owedToUs?: number
+  weOwe?: number
   balance: number
+  netBalance?: number
   currency: string
+  legs?: DebtLeg[]
   entries: DebtEntry[]
 }
 

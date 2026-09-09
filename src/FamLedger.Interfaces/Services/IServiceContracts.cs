@@ -80,6 +80,7 @@ public interface IDebtService
 {
     Task<Debt> CreateAsync(Guid contextId, string counterpartyName, Guid? counterpartyUserId, Domain.Enums.DebtDirection direction, CancellationToken ct = default);
     Task<DebtEntry> AddEntryAsync(Guid debtId, decimal amount, string currency, string description, CancellationToken ct = default);
+    Task ApplyEntryPaymentAsync(Guid entryId, decimal amount, CancellationToken ct = default);
     Task ToggleEntryPaidAsync(Guid entryId, CancellationToken ct = default);
     Task DeleteAsync(Guid debtId, CancellationToken ct = default);
     Task DeleteEntryAsync(Guid entryId, CancellationToken ct = default);
