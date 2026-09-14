@@ -4,7 +4,7 @@ public static class ThresholdPercentHelper
 {
     public const int MaxCount = 10;
     public static readonly int[] DefaultBudgetAlert = [80];
-    public static readonly int[] DefaultCategoryLimit = [50, 80];
+    public static readonly int[] DefaultCategoryLimit = [25, 50, 75, 95];
 
     public static int[] Normalize(IEnumerable<int>? percents, int[] fallback)
     {

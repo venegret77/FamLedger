@@ -33,7 +33,12 @@ import {
   normalizeThresholds,
 } from '../components/ThresholdEditor'
 import { CategorySpendProgressList } from '../components/CategorySpendProgress'
+import { SortableCategoryList } from '../components/SortableCategoryList'
 import { useCategorySpendRows } from '../hooks/useCategorySpendRows'
+import { useToast } from '../components/ui/Toast'
+import { ApiError } from '../api/client'
+
+const DEFAULT_CATEGORY_THRESHOLDS = [25, 50, 75, 95]
 
 type SettingsTab = 'general' | 'categories'
 
@@ -50,6 +55,7 @@ export function SettingsPage() {
   }
 
   const { confirm } = useConfirmDialog()
+  const { showToast } = useToast()
   const { data: user } = useMe()
   const { data: settings, isLoading, isError, refetch } = useSettings()
   const { data: contexts } = useContexts()
@@ -88,7 +94,7 @@ export function SettingsPage() {
   const [editingLimit, setEditingLimit] = useState<CategorySpendingLimit | null>(null)
   const [limitCategoryId, setLimitCategoryId] = useState('')
   const [limitAmount, setLimitAmount] = useState('')
-  const [limitThresholds, setLimitThresholds] = useState<number[]>([50, 80])
+  const [limitThresholds, setLimitThresholds] = useState<number[]>(DEFAULT_CATEGORY_THRESHOLDS)
   const [limitAudience, setLimitAudience] = useState<ReminderAudience>('Self')
   const [limitEnabled, setLimitEnabled] = useState(true)
 
@@ -175,20 +181,26 @@ export function SettingsPage() {
     setSelectedCategoryIds(new Set())
   }
 
-  async function moveCategory(id: string, direction: -1 | 1) {
-    const index = categories.findIndex((c) => c.id === id)
-    const swap = index + direction
-    if (index < 0 || swap < 0 || swap >= categories.length) return
-    const next = [...categories]
-    ;[next[index], next[swap]] = [next[swap], next[index]]
-    await reorderCategories.mutateAsync(next.map((c) => c.id))
+  async function handleReorderCategories(orderedIds: string[]) {
+    await reorderCategories.mutateAsync(orderedIds)
   }
 
   function openCreateLimit() {
+    const used = new Set((categoryLimits ?? []).map((l) => l.categoryId))
+    const available = expenseCategories.filter((c) => !used.has(c.id))
+    if (available.length === 0) {
+      showToast({
+        title: 'Нет свободных категорий',
+        message: 'Лимит уже задан для всех категорий расходов.',
+        tone: 'warning',
+      })
+      return
+    }
+
     setEditingLimit(null)
-    setLimitCategoryId(expenseCategories[0]?.id ?? '')
+    setLimitCategoryId(available[0]!.id)
     setLimitAmount('')
-    setLimitThresholds([50, 80])
+    setLimitThresholds([...DEFAULT_CATEGORY_THRESHOLDS])
     setLimitAudience('Self')
     setLimitEnabled(true)
     setShowLimitForm(true)
@@ -214,30 +226,52 @@ export function SettingsPage() {
   async function handleLimitSubmit(event: FormEvent) {
     event.preventDefault()
     const amount = Number.parseFloat(limitAmount.replace(',', '.'))
-    if (!limitCategoryId || Number.isNaN(amount) || amount <= 0) return
+    if (!limitCategoryId || Number.isNaN(amount) || amount <= 0) {
+      showToast({
+        title: 'Проверьте форму',
+        message: 'Нужны категория и сумма лимита больше нуля.',
+        tone: 'warning',
+      })
+      return
+    }
     const thresholds = normalizeThresholds(limitThresholds)
-    if (thresholds.length === 0) return
+    if (thresholds.length === 0) {
+      showToast({
+        title: 'Добавьте пороги',
+        message: 'Нужен хотя бы один порог от 1 до 100%.',
+        tone: 'warning',
+      })
+      return
+    }
 
     const nextAudience: ReminderAudience =
       limitAudience === 'Family' && !isPersonal ? 'Family' : 'Self'
 
-    if (editingLimit) {
-      await updateLimit.mutateAsync({
-        id: editingLimit.id,
-        limitAmount: amount,
-        thresholdPercents: thresholds,
-        audience: nextAudience,
-        isEnabled: limitEnabled,
-      })
-    } else {
-      await createLimit.mutateAsync({
-        categoryId: limitCategoryId,
-        limitAmount: amount,
-        thresholdPercents: thresholds,
-        audience: nextAudience,
-      })
+    try {
+      if (editingLimit) {
+        await updateLimit.mutateAsync({
+          id: editingLimit.id,
+          limitAmount: amount,
+          thresholdPercents: thresholds,
+          audience: nextAudience,
+          isEnabled: limitEnabled,
+        })
+      } else {
+        await createLimit.mutateAsync({
+          categoryId: limitCategoryId,
+          limitAmount: amount,
+          thresholdPercents: thresholds,
+          audience: nextAudience,
+        })
+      }
+      closeLimitForm()
+    } catch (err) {
+      const message =
+        err instanceof ApiError
+          ? ((err.body as { message?: string } | null)?.message ?? err.message)
+          : 'Не удалось сохранить лимит'
+      showToast({ title: 'Ошибка', message, tone: 'warning' })
     }
-    closeLimitForm()
   }
 
   async function handleSaveProfile(event: FormEvent) {
@@ -447,7 +481,7 @@ export function SettingsPage() {
               <Card>
                 <CardTitle>Категории</CardTitle>
                 <CardDescription>
-                  Добавляйте, переименовывайте и меняйте порядок стрелками
+                  Добавляйте, переименовывайте и меняйте порядок перетаскиванием
                 </CardDescription>
 
                 <form
@@ -497,98 +531,41 @@ export function SettingsPage() {
                       )}
                     </div>
 
-                    <ul className="mt-3 divide-y divide-slate-100 rounded-xl border border-slate-200">
-                      {categories.map((cat, index) => (
-                        <li key={cat.id} className="flex items-center justify-between gap-3 px-4 py-3">
-                          {editingId === cat.id ? (
-                            <div className="flex flex-1 items-center gap-2">
-                              <input
-                                className="flex-1 rounded-lg border border-slate-200 px-3 py-1.5 text-sm"
-                                value={editingName}
-                                onChange={(e) => setEditingName(e.target.value)}
-                              />
-                              <Button
-                                size="sm"
-                                loading={updateCategory.isPending}
-                                onClick={() => void handleSaveCategory(cat.id)}
-                              >
-                                Сохранить
-                              </Button>
-                              <Button size="sm" variant="ghost" onClick={() => setEditingId(null)}>
-                                Отмена
-                              </Button>
-                            </div>
-                          ) : (
-                            <>
-                              <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
-                                <input
-                                  type="checkbox"
-                                  className="size-4 shrink-0 rounded border-slate-300"
-                                  checked={selectedCategoryIds.has(cat.id)}
-                                  onChange={() => toggleCategory(cat.id)}
-                                />
-                                <span className="truncate font-medium text-slate-900">{cat.name}</span>
-                              </label>
-                              <div className="flex shrink-0 items-center gap-1">
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  disabled={index === 0 || reorderCategories.isPending}
-                                  onClick={() => void moveCategory(cat.id, -1)}
-                                  title="Выше"
-                                >
-                                  ↑
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  disabled={
-                                    index === categories.length - 1 || reorderCategories.isPending
-                                  }
-                                  onClick={() => void moveCategory(cat.id, 1)}
-                                  title="Ниже"
-                                >
-                                  ↓
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={() => {
-                                    setEditingId(cat.id)
-                                    setEditingName(cat.name)
-                                  }}
-                                >
-                                  Изменить
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  className="text-red-600 hover:bg-red-50"
-                                  loading={deleteCategory.isPending}
-                                  onClick={async () => {
-                                    const accepted = await confirm({
-                                      title: `Удалить категорию «${cat.name}»?`,
-                                      message: 'У связанных операций категория будет очищена.',
-                                    })
-                                    if (accepted) {
-                                      void deleteCategory.mutateAsync(cat.id).then(() => {
-                                        setSelectedCategoryIds((prev) => {
-                                          const next = new Set(prev)
-                                          next.delete(cat.id)
-                                          return next
-                                        })
-                                      })
-                                    }
-                                  }}
-                                >
-                                  Удалить
-                                </Button>
-                              </div>
-                            </>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
+                    <SortableCategoryList
+                      categories={categories.map((c) => ({ id: c.id, name: c.name }))}
+                      selectedIds={selectedCategoryIds}
+                      disabled={reorderCategories.isPending}
+                      editingId={editingId}
+                      editingName={editingName}
+                      onEditingNameChange={setEditingName}
+                      onToggleSelect={toggleCategory}
+                      onStartEdit={(id, name) => {
+                        setEditingId(id)
+                        setEditingName(name)
+                      }}
+                      onCancelEdit={() => setEditingId(null)}
+                      onSaveEdit={(id) => void handleSaveCategory(id)}
+                      onDelete={(id, name) => {
+                        void (async () => {
+                          const accepted = await confirm({
+                            title: `Удалить категорию «${name}»?`,
+                            message: 'У связанных операций категория будет очищена.',
+                          })
+                          if (accepted) {
+                            void deleteCategory.mutateAsync(id).then(() => {
+                              setSelectedCategoryIds((prev) => {
+                                const next = new Set(prev)
+                                next.delete(id)
+                                return next
+                              })
+                            })
+                          }
+                        })()
+                      }}
+                      onReorder={(orderedIds) => void handleReorderCategories(orderedIds)}
+                      savePending={updateCategory.isPending}
+                      deletePending={deleteCategory.isPending}
+                    />
                   </>
                 )}
               </Card>

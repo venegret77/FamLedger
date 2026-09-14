@@ -9,4 +9,7 @@
     <Project Path="src/FamLedger.Services/FamLedger.Services.csproj" />
     <Project Path="src/FamLedger.Telegram/FamLedger.Telegram.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/FamLedger.Services.Tests/FamLedger.Services.Tests.csproj" />
+  </Folder>
 </Solution>

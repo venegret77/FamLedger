@@ -9,7 +9,7 @@ public class CategorySpendingLimit
     public Guid CategoryId { get; set; }
     public Guid CreatedByUserId { get; set; }
     public decimal LimitAmount { get; set; }
-    public int[] ThresholdPercents { get; set; } = [50, 80];
+    public int[] ThresholdPercents { get; set; } = [25, 50, 75, 95];
     public ReminderAudience Audience { get; set; } = ReminderAudience.Self;
     public bool IsEnabled { get; set; } = true;
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;

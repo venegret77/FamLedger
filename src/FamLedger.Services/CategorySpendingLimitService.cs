@@ -40,18 +40,18 @@ public class CategorySpendingLimitService(
     {
         ValidateAudience(audience, isPersonalContext);
         if (limitAmount <= 0)
-            throw new InvalidOperationException("Limit amount must be positive");
+            throw new InvalidOperationException("Сумма лимита должна быть больше нуля");
 
         var category = await db.Categories
             .FirstOrDefaultAsync(c => c.Id == categoryId && c.ContextId == contextId, ct)
-            ?? throw new InvalidOperationException("Category not found");
+            ?? throw new InvalidOperationException("Категория не найдена");
         if (category.Kind != CategoryKind.Expense)
-            throw new InvalidOperationException("Limits are only for expense categories");
+            throw new InvalidOperationException("Лимиты можно задать только для категорий расходов");
 
         var exists = await db.CategorySpendingLimits
             .AnyAsync(l => l.ContextId == contextId && l.CategoryId == categoryId, ct);
         if (exists)
-            throw new InvalidOperationException("A limit for this category already exists");
+            throw new InvalidOperationException("Лимит для этой категории уже есть");
 
         var limit = new CategorySpendingLimit
         {
@@ -316,6 +316,6 @@ public class CategorySpendingLimitService(
     private static void ValidateAudience(ReminderAudience audience, bool isPersonalContext)
     {
         if (audience == ReminderAudience.Family && isPersonalContext)
-            throw new InvalidOperationException("Family audience is only available in a family budget");
+            throw new InvalidOperationException("Семейные уведомления доступны только в семейном бюджете");
     }
 }

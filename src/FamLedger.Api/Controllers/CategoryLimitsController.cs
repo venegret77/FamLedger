@@ -19,7 +19,7 @@ public class CategoryLimitsController(
         Guid? CategoryId,
         decimal LimitAmount,
         int[]? ThresholdPercents,
-        string Audience,
+        string? Audience,
         bool? IsEnabled);
 
     [HttpGet]
@@ -36,10 +36,10 @@ public class CategoryLimitsController(
         try
         {
             var (context, userId) = await GetActiveContextAsync(ct);
-            if (request.CategoryId is null)
-                return BadRequest(new { message = "CategoryId is required" });
+            if (request.CategoryId is null || request.CategoryId == Guid.Empty)
+                return BadRequest(new { message = "Выберите категорию" });
             if (!TryParseAudience(request.Audience, out var audience))
-                return BadRequest(new { message = "Invalid audience" });
+                return BadRequest(new { message = "Некорректная аудитория уведомлений" });
 
             var created = await limitService.CreateAsync(
                 context.Id,
@@ -139,7 +139,12 @@ public class CategoryLimitsController(
 
     private static bool TryParseAudience(string? value, out ReminderAudience audience)
     {
-        audience = ReminderAudience.Self;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            audience = ReminderAudience.Self;
+            return true;
+        }
+
         return Enum.TryParse(value, ignoreCase: true, out audience);
     }
 }
