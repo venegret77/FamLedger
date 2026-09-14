@@ -1,10 +1,17 @@
 import { useMemo, useState } from 'react'
-import { useDeleteTransaction, useSettings, useTransactions } from '../api/hooks'
+import {
+  useCategoryLimits,
+  useDeleteTransaction,
+  useSettings,
+  useTransactions,
+} from '../api/hooks'
 import { useConfirmDialog } from '../components/ui/ConfirmDialog'
-import { Card } from '../components/ui/Card'
+import { Card, CardTitle } from '../components/ui/Card'
 import { EmptyState, PageHeader, Spinner, Tabs, Badge } from '../components/ui/Tabs'
 import { MoneyDisplay } from '../components/ui/MoneyDisplay'
 import { Button } from '../components/ui/Button'
+import { CategorySpendProgressList } from '../components/CategorySpendProgress'
+import { useCategorySpendRows } from '../hooks/useCategorySpendRows'
 import { formatDate, formatMoney } from '../lib/format'
 
 const viewTabs = [
@@ -16,10 +23,12 @@ const viewTabs = [
 export function TransactionsPage() {
   const { data: transactions, isLoading, isError, refetch } = useTransactions()
   const { data: settings } = useSettings()
+  const { data: categoryLimits } = useCategoryLimits()
   const deleteTx = useDeleteTransaction()
   const { confirm } = useConfirmDialog()
   const [activeTab, setActiveTab] = useState('list')
   const baseCurrency = settings?.baseCurrency ?? 'RSD'
+  const categoryRows = useCategorySpendRows(transactions, categoryLimits)
 
   const byDay = useMemo(() => {
     if (!transactions?.length) return []
@@ -30,17 +39,6 @@ export function TransactionsPage() {
       map.set(tx.date, list)
     }
     return [...map.entries()].sort((a, b) => b[0].localeCompare(a[0]))
-  }, [transactions])
-
-  const byCategory = useMemo(() => {
-    if (!transactions?.length) return []
-    const map = new Map<string, number>()
-    for (const tx of transactions) {
-      if ((tx.kind ?? 'Expense') !== 'Expense') continue
-      const key = tx.categoryName ?? 'Без категории'
-      map.set(key, (map.get(key) ?? 0) + tx.baseAmount)
-    }
-    return [...map.entries()].sort((a, b) => b[1] - a[1])
   }, [transactions])
 
   function signedAmount(tx: { amount: number; kind?: string }) {
@@ -156,15 +154,16 @@ export function TransactionsPage() {
           })}
         </div>
       ) : (
-        <Card padding="none">
-          <ul className="divide-y divide-slate-100">
-            {byCategory.map(([name, total]) => (
-              <li key={name} className="flex justify-between gap-4 px-5 py-4">
-                <span className="font-medium text-slate-900">{name}</span>
-                <span className="text-slate-900">{formatMoney(total, baseCurrency)}</span>
-              </li>
-            ))}
-          </ul>
+        <Card>
+          <CardTitle>По категориям</CardTitle>
+          <p className="mt-1 text-sm text-slate-500">
+            Прогресс по лимитам за текущий период
+          </p>
+          {categoryRows.length === 0 ? (
+            <p className="mt-4 text-sm text-slate-500">Расходов по категориям пока нет.</p>
+          ) : (
+            <CategorySpendProgressList rows={categoryRows} currency={baseCurrency} />
+          )}
         </Card>
       )}
     </div>

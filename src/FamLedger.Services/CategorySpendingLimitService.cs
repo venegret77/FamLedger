@@ -120,6 +120,42 @@ public class CategorySpendingLimitService(
         await db.SaveChangesAsync(ct);
     }
 
+    public async Task ReconcileFiresAfterSpendChangeAsync(
+        Guid contextId,
+        Guid? categoryId,
+        CancellationToken ct = default)
+    {
+        var context = await db.BudgetContexts.FindAsync([contextId], ct);
+        if (context is null) return;
+
+        var query = db.CategorySpendingLimits
+            .Where(l => l.ContextId == contextId && l.IsEnabled);
+        if (categoryId is not null)
+            query = query.Where(l => l.CategoryId == categoryId);
+
+        var limits = await query.ToListAsync(ct);
+        if (limits.Count == 0) return;
+
+        var period = await periodService.EnsureActivePeriodAsync(context, ct);
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        foreach (var limit in limits)
+        {
+            var spent = await db.Transactions
+                .Where(t =>
+                    t.PeriodId == period.Id &&
+                    t.CategoryId == limit.CategoryId &&
+                    t.Kind == TransactionKind.Expense)
+                .SumAsync(t => (decimal?)t.BaseAmount, ct) ?? 0m;
+
+            var percentUsed = limit.LimitAmount <= 0
+                ? 0
+                : (int)Math.Round(spent / limit.LimitAmount * 100m, MidpointRounding.AwayFromZero);
+
+            await ClearUncrossedFiresAsync(limit.Id, percentUsed, today, ct);
+        }
+    }
+
     public async Task<IReadOnlyList<CategoryLimitAlertInfo>> EvaluateAfterExpenseAsync(
         Guid contextId,
         Guid actingUserId,
@@ -164,6 +200,9 @@ public class CategorySpendingLimitService(
                 spent / limit.LimitAmount * 100m, MidpointRounding.AwayFromZero);
             var thresholds = ThresholdPercentHelper.Normalize(
                 limit.ThresholdPercents, ThresholdPercentHelper.DefaultCategoryLimit);
+
+            await ClearUncrossedFiresAsync(limit.Id, percentUsed, today, ct);
+
             var active = thresholds.Where(t => percentUsed >= t).ToList();
             if (active.Count == 0) continue;
 
@@ -200,6 +239,24 @@ public class CategorySpendingLimitService(
         }
 
         return results;
+    }
+
+    private async Task ClearUncrossedFiresAsync(
+        Guid limitId,
+        int percentUsed,
+        DateOnly todayUtc,
+        CancellationToken ct)
+    {
+        var stale = await db.CategoryLimitThresholdFires
+            .Where(f =>
+                f.LimitId == limitId &&
+                f.LastFiredDateUtc == todayUtc &&
+                f.ThresholdPercent > percentUsed)
+            .ToListAsync(ct);
+        if (stale.Count == 0) return;
+
+        db.CategoryLimitThresholdFires.RemoveRange(stale);
+        await db.SaveChangesAsync(ct);
     }
 
     private async Task MarkCategoryThresholdsFiredAsync(

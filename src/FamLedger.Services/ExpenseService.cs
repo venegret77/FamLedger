@@ -12,7 +12,9 @@ public class ExpenseService(
     IBudgetPeriodService periodService,
     IExchangeRateService exchangeRateService,
     IRedisService redis,
-    IUserActivityService userActivity) : IExpenseService
+    IUserActivityService userActivity,
+    IBudgetAlertService budgetAlertService,
+    ICategorySpendingLimitService categoryLimitService) : IExpenseService
 {
     public async Task<Transaction> AddAsync(
         Guid contextId,
@@ -72,5 +74,11 @@ public class ExpenseService(
             .Where(t => t.Id == transactionId)
             .ExecuteDeleteAsync(ct);
         await redis.DeleteAsync(CacheKeys.BudgetSummary(tx.PeriodId));
+
+        if (tx.Kind == TransactionKind.Expense)
+        {
+            await budgetAlertService.ReconcileFiresAfterSpendChangeAsync(tx.ContextId, ct);
+            await categoryLimitService.ReconcileFiresAfterSpendChangeAsync(tx.ContextId, tx.CategoryId, ct);
+        }
     }
 }

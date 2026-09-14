@@ -136,7 +136,7 @@ public class FamilyController(
             .AsNoTracking()
             .Where(c => c.ContextId == context!.Id)
             .OrderBy(c => c.SortOrder)
-            .Select(c => new { c.Id, c.Name, c.Kind })
+            .Select(c => new { c.Id, c.Name, Kind = c.Kind.ToString(), c.SortOrder })
             .ToListAsync(ct);
         return Ok(new
         {
@@ -176,7 +176,7 @@ public class SettingsController(IUserService userService, AppDbContext db, ICate
             myRole = role.ToString(),
             canManagePlan = RolePermissions.CanManagePlan(role),
             canManageFamilySettings = RolePermissions.CanManageFamilySettings(role),
-            categories = categories.Select(c => new { c.Id, c.Name, c.Kind })
+            categories = categories.Select(c => new { c.Id, c.Name, Kind = c.Kind.ToString(), c.SortOrder })
         });
     }
 

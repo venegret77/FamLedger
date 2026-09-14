@@ -47,6 +47,7 @@ public interface ICategoryService
     Task<Category> CreateAsync(Guid contextId, string name, Guid userId, CancellationToken ct = default);
     Task UpdateAsync(Guid categoryId, string name, Guid userId, CancellationToken ct = default);
     Task DeleteAsync(Guid categoryId, Guid userId, CancellationToken ct = default);
+    Task ReorderAsync(Guid contextId, Guid userId, IReadOnlyList<Guid> orderedIds, CancellationToken ct = default);
     Task SeedDefaultsAsync(Guid contextId, CancellationToken ct = default);
 }
 
@@ -221,6 +222,11 @@ public interface IBudgetAlertService
         Guid actingUserId,
         bool notifyViaTelegram,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Сбрасывает отметки сработавших порогов, которые уже не пересечены (после удаления расхода).
+    /// </summary>
+    Task ReconcileFiresAfterSpendChangeAsync(Guid contextId, CancellationToken ct = default);
 }
 
 public interface IUserActivityService
@@ -260,6 +266,10 @@ public interface ICategorySpendingLimitService
         bool isPersonalContext,
         CancellationToken ct = default);
     Task DeleteAsync(Guid id, Guid userId, CancellationToken ct = default);
+    Task ReconcileFiresAfterSpendChangeAsync(
+        Guid contextId,
+        Guid? categoryId,
+        CancellationToken ct = default);
     Task<IReadOnlyList<CategoryLimitAlertInfo>> EvaluateAfterExpenseAsync(
         Guid contextId,
         Guid actingUserId,

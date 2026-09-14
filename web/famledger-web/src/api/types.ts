@@ -254,7 +254,7 @@ export interface AppSettings {
   myRole?: FamilyMemberRole
   canManagePlan?: boolean
   canManageFamilySettings?: boolean
-  categories?: { id: string; name: string; kind?: string }[]
+  categories?: { id: string; name: string; kind?: string; sortOrder?: number }[]
 }
 
 export type ReminderAudience = 'Self' | 'Family'

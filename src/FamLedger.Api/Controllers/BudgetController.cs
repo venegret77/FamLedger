@@ -261,17 +261,38 @@ public class BudgetController(
     {
         var (context, _) = await GetActiveContextAsync(ct);
         var cats = await categoryService.GetByContextAsync(context.Id, ct);
-        return Ok(cats.Select(c => new { c.Id, c.Name, c.Kind, c.IsDefault }));
+        return Ok(cats.Select(c => new { c.Id, c.Name, Kind = c.Kind.ToString(), c.IsDefault, c.SortOrder }));
     }
 
     public record CategoryRequest(string Name);
+    public record ReorderCategoriesRequest(Guid[] OrderedIds);
 
     [HttpPost("categories")]
     public async Task<IActionResult> CreateCategory([FromBody] CategoryRequest request, CancellationToken ct)
     {
         var (context, _) = await GetActiveContextAsync(ct);
         var cat = await categoryService.CreateAsync(context.Id, request.Name, User.GetUserId(), ct);
-        return Ok(new { cat.Id, cat.Name });
+        return Ok(new { cat.Id, cat.Name, Kind = cat.Kind.ToString(), cat.SortOrder });
+    }
+
+    [HttpPut("categories/reorder")]
+    public async Task<IActionResult> ReorderCategories([FromBody] ReorderCategoriesRequest request, CancellationToken ct)
+    {
+        try
+        {
+            var (context, _) = await GetActiveContextAsync(ct);
+            await categoryService.ReorderAsync(
+                context.Id, User.GetUserId(), request.OrderedIds ?? [], ct);
+            return Ok();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     [HttpPatch("categories/{id:guid}")]

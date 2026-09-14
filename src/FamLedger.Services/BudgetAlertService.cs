@@ -2,6 +2,7 @@ using FamLedger.Common;
 using FamLedger.Domain.Enums;
 using FamLedger.Interfaces.Services;
 using FamLedger.Repository;
+using Microsoft.EntityFrameworkCore;
 
 namespace FamLedger.Services;
 
@@ -12,6 +13,27 @@ public class BudgetAlertService(
     IBudgetCalculatorService calculator,
     INotificationService notifications) : IBudgetAlertService
 {
+    public async Task ReconcileFiresAfterSpendChangeAsync(Guid contextId, CancellationToken ct = default)
+    {
+        var context = await db.BudgetContexts.FindAsync([contextId], ct);
+        if (context is null) return;
+
+        var alerts = await reminders.GetEnabledBudgetAlertsAsync(contextId, ct);
+        if (alerts.Count == 0) return;
+
+        var period = await periodService.EnsureActivePeriodAsync(context, ct);
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var summary = await calculator.CalculateAsync(context, period, today, ct);
+        var percentUsed = BudgetSummaryFormatter.TryGetDailySpendPercent(summary) ?? 0;
+        if (summary.AvailableToday < 0)
+            percentUsed = Math.Max(percentUsed, 100);
+
+        foreach (var reminder in alerts)
+        {
+            await ClearUncrossedFiresAsync(reminder.Id, percentUsed, today, ct);
+        }
+    }
+
     public async Task<BudgetAlertInfo?> EvaluateAfterExpenseAsync(
         Guid contextId,
         Guid actingUserId,
@@ -46,6 +68,8 @@ public class BudgetAlertService(
             var thresholds = ThresholdPercentHelper.Normalize(
                 reminder.ThresholdPercents, ThresholdPercentHelper.DefaultBudgetAlert);
 
+            await ClearUncrossedFiresAsync(reminder.Id, percentUsed, today, ct);
+
             var activeThresholds = thresholds.Where(t => percentUsed >= t).ToList();
             if (activeThresholds.Count == 0) continue;
 
@@ -75,5 +99,23 @@ public class BudgetAlertService(
         }
 
         return forClient;
+    }
+
+    private async Task ClearUncrossedFiresAsync(
+        Guid reminderId,
+        int percentUsed,
+        DateOnly todayUtc,
+        CancellationToken ct)
+    {
+        var stale = await db.ReminderThresholdFires
+            .Where(f =>
+                f.ReminderId == reminderId &&
+                f.LastFiredDateUtc == todayUtc &&
+                f.ThresholdPercent > percentUsed)
+            .ToListAsync(ct);
+        if (stale.Count == 0) return;
+
+        db.ReminderThresholdFires.RemoveRange(stale);
+        await db.SaveChangesAsync(ct);
     }
 }

@@ -19,6 +19,7 @@ public class CategoryService(AppDbContext db, IRedisService redis, IContextServi
             .AsNoTracking()
             .Where(c => c.ContextId == contextId)
             .OrderBy(c => c.SortOrder)
+            .ThenBy(c => c.Name)
             .Select(c => new Category
             {
                 Id = c.Id,
@@ -39,7 +40,17 @@ public class CategoryService(AppDbContext db, IRedisService redis, IContextServi
         if (member is null || !RolePermissions.CanManagePlan(member.Role))
             throw new UnauthorizedAccessException();
 
-        var cat = new Category { ContextId = contextId, Name = name, Kind = CategoryKind.Expense };
+        var maxOrder = await db.Categories
+            .Where(c => c.ContextId == contextId)
+            .MaxAsync(c => (int?)c.SortOrder, ct) ?? -1;
+
+        var cat = new Category
+        {
+            ContextId = contextId,
+            Name = name.Trim(),
+            Kind = CategoryKind.Expense,
+            SortOrder = maxOrder + 1,
+        };
         db.Categories.Add(cat);
         await db.SaveChangesAsync(ct);
         await redis.DeleteAsync(CacheKeys.Categories(contextId));
@@ -52,7 +63,7 @@ public class CategoryService(AppDbContext db, IRedisService redis, IContextServi
         var member = await contextService.GetMembershipAsync(cat.ContextId, userId, ct);
         if (member is null || !RolePermissions.CanManagePlan(member.Role))
             throw new UnauthorizedAccessException();
-        cat.Name = name;
+        cat.Name = name.Trim();
         await db.SaveChangesAsync(ct);
         await redis.DeleteAsync(CacheKeys.Categories(cat.ContextId));
     }
@@ -74,6 +85,41 @@ public class CategoryService(AppDbContext db, IRedisService redis, IContextServi
         db.Categories.Remove(cat);
         await db.SaveChangesAsync(ct);
         await redis.DeleteAsync(CacheKeys.Categories(cat.ContextId));
+    }
+
+    public async Task ReorderAsync(
+        Guid contextId,
+        Guid userId,
+        IReadOnlyList<Guid> orderedIds,
+        CancellationToken ct = default)
+    {
+        var member = await contextService.GetMembershipAsync(contextId, userId, ct);
+        if (member is null || !RolePermissions.CanManagePlan(member.Role))
+            throw new UnauthorizedAccessException();
+
+        if (orderedIds.Count == 0)
+            throw new InvalidOperationException("Ordered id list is empty");
+        if (orderedIds.Distinct().Count() != orderedIds.Count)
+            throw new InvalidOperationException("Duplicate category ids in order");
+
+        var cats = await db.Categories
+            .Where(c => c.ContextId == contextId)
+            .ToListAsync(ct);
+        if (cats.Count != orderedIds.Count)
+            throw new InvalidOperationException("Order must include all categories of this budget");
+
+        var byId = cats.ToDictionary(c => c.Id);
+        foreach (var id in orderedIds)
+        {
+            if (!byId.ContainsKey(id))
+                throw new InvalidOperationException("Unknown category in order list");
+        }
+
+        for (var i = 0; i < orderedIds.Count; i++)
+            byId[orderedIds[i]].SortOrder = i;
+
+        await db.SaveChangesAsync(ct);
+        await redis.DeleteAsync(CacheKeys.Categories(contextId));
     }
 
     public async Task SeedDefaultsAsync(Guid contextId, CancellationToken ct = default)

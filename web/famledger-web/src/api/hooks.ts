@@ -67,7 +67,7 @@ export function useCategories() {
   return useQuery({
     queryKey: queryKeys.categories,
     queryFn: () =>
-      apiFetch<{ id: string; name: string; emoji?: string; kind?: string }[]>(
+      apiFetch<{ id: string; name: string; emoji?: string; kind?: string; sortOrder?: number }[]>(
         '/api/categories',
       ),
   })
@@ -330,6 +330,7 @@ export function useDeleteCategory() {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.categories })
       await queryClient.invalidateQueries({ queryKey: queryKeys.settings })
+      await queryClient.invalidateQueries({ queryKey: queryKeys.categoryLimits })
     },
   })
 }
@@ -342,6 +343,22 @@ export function useDeleteCategories() {
         ids.map((id) => apiFetch<void>(`/api/categories/${id}`, { method: 'DELETE' })),
       )
     },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.categories })
+      await queryClient.invalidateQueries({ queryKey: queryKeys.settings })
+      await queryClient.invalidateQueries({ queryKey: queryKeys.categoryLimits })
+    },
+  })
+}
+
+export function useReorderCategories() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (orderedIds: string[]) =>
+      apiFetch<void>('/api/categories/reorder', {
+        method: 'PUT',
+        body: { orderedIds },
+      }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.categories })
       await queryClient.invalidateQueries({ queryKey: queryKeys.settings })

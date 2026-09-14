@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import {
   useCategories,
+  useCategoryLimits,
   useCreateTransaction,
   useDashboard,
   usePermissions,
@@ -15,6 +16,8 @@ import { StatCard } from '../components/ui/MoneyDisplay'
 import { MobileMoreMenu } from '../components/layout/Navigation'
 import { useConfirmDialog } from '../components/ui/ConfirmDialog'
 import { useToast } from '../components/ui/Toast'
+import { DashboardCategorySpend } from '../components/DashboardCategorySpend'
+import { useCategorySpendRows } from '../hooks/useCategorySpendRows'
 import { formatMoney } from '../lib/format'
 import { currencyOptions } from '../api/types'
 import type { FormEvent } from 'react'
@@ -29,8 +32,10 @@ export function DashboardPage() {
   const { data: summary, isLoading, isError, refetch } = useDashboard()
   const { data: categories } = useCategories()
   const { data: transactions } = useTransactions()
+  const { data: categoryLimits } = useCategoryLimits()
   const createTransaction = useCreateTransaction()
   const startNewPeriod = useStartNewPeriod()
+  const categoryRows = useCategorySpendRows(transactions, categoryLimits)
 
   const [mode, setMode] = useState<TxMode>('Expense')
   const [amount, setAmount] = useState('')
@@ -40,17 +45,6 @@ export function DashboardPage() {
 
   const currency = summary?.currency ?? 'RSD'
   const selectedCurrency = expenseCurrency || currency
-
-  const byCategory = useMemo(() => {
-    if (!transactions?.length) return []
-    const map = new Map<string, number>()
-    for (const tx of transactions) {
-      if ((tx.kind ?? 'Expense') !== 'Expense') continue
-      const key = tx.categoryName ?? 'Без категории'
-      map.set(key, (map.get(key) ?? 0) + tx.baseAmount)
-    }
-    return [...map.entries()].sort((a, b) => b[1] - a[1])
-  }, [transactions])
 
   const filteredCategories = useMemo(() => {
     const kind = mode
@@ -210,18 +204,8 @@ export function DashboardPage() {
         />
       </div>
 
-      {byCategory.length > 0 && (
-        <Card>
-          <CardTitle>Расходы по категориям</CardTitle>
-          <ul className="mt-4 divide-y divide-slate-100">
-            {byCategory.map(([name, total]) => (
-              <li key={name} className="flex items-center justify-between py-2 text-sm">
-                <span className="text-slate-700">{name}</span>
-                <span className="font-medium text-slate-900">{formatMoney(total, currency)}</span>
-              </li>
-            ))}
-          </ul>
-        </Card>
+      {categoryRows.length > 0 && (
+        <DashboardCategorySpend rows={categoryRows} currency={currency} />
       )}
 
       <Card>

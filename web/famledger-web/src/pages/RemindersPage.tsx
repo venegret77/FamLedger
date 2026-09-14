@@ -1,26 +1,21 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import {
-  useCategoryLimits,
-  useCreateCategoryLimit,
   useCreateReminder,
-  useDeleteCategoryLimit,
   useDeleteReminder,
   useReminders,
   useSettings,
-  useUpdateCategoryLimit,
   useUpdateReminder,
 } from '../api/hooks'
-import type {
-  CategorySpendingLimit,
-  Reminder,
-  ReminderAudience,
-  ReminderKind,
-} from '../api/types'
+import type { Reminder, ReminderAudience, ReminderKind } from '../api/types'
 import { Card, CardTitle } from '../components/ui/Card'
 import { EmptyState, PageHeader, Spinner, Badge } from '../components/ui/Tabs'
 import { Button } from '../components/ui/Button'
 import { useConfirmDialog } from '../components/ui/ConfirmDialog'
 import { Input, Select } from '../components/ui/Input'
+import {
+  ThresholdEditor,
+  normalizeThresholds,
+} from '../components/ThresholdEditor'
 import {
   currentLocalTimeHm,
   localTimeToUtc,
@@ -41,7 +36,7 @@ const STANDARD_META: Record<
   BudgetAlert: {
     title: 'Лимит бюджета',
     description:
-      'При добавлении расхода — если «Доступно сегодня» достигло одного из порогов от дневного бюджета или ушло в минус. Каждый порог — отдельное уведомление раз в сутки. В Telegram — сообщение, на сайте — всплывашка.',
+      'При добавлении расхода — если «Доступно сегодня» достигло одного из порогов от дневного бюджета или ушло в минус. Каждый порог — отдельное уведомление; после удаления расхода порог может сработать снова. В Telegram — сообщение, на сайте — всплывашка.',
     needsTime: false,
     needsThreshold: true,
   },
@@ -73,94 +68,13 @@ const STANDARD_META: Record<
   },
 }
 
-function normalizeThresholds(values: number[]): number[] {
-  return [...new Set(values.filter((n) => n >= 1 && n <= 100))].sort((a, b) => a - b).slice(0, 10)
-}
-
-function ThresholdEditor({
-  values,
-  onChange,
-  disabled,
-}: {
-  values: number[]
-  onChange: (next: number[]) => void
-  disabled?: boolean
-}) {
-  const [draft, setDraft] = useState('')
-
-  function addThreshold() {
-    const n = Number.parseInt(draft, 10)
-    if (Number.isNaN(n) || n < 1 || n > 100) return
-    onChange(normalizeThresholds([...values, n]))
-    setDraft('')
-  }
-
-  return (
-    <div className="space-y-2">
-      <p className="text-sm font-medium text-slate-700">Пороги %</p>
-      <div className="flex flex-wrap gap-2">
-        {values.map((t) => (
-          <button
-            key={t}
-            type="button"
-            disabled={disabled}
-            onClick={() => onChange(values.filter((x) => x !== t))}
-            className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-sm text-slate-700 hover:bg-slate-100 disabled:opacity-50"
-            title="Убрать порог"
-          >
-            {t}%
-            <span aria-hidden className="text-slate-400">
-              ×
-            </span>
-          </button>
-        ))}
-        {values.length === 0 && (
-          <span className="text-sm text-slate-400">Нет порогов</span>
-        )}
-      </div>
-      <div className="flex max-w-xs gap-2">
-        <Input
-          type="number"
-          min={1}
-          max={100}
-          value={draft}
-          placeholder="например 50"
-          disabled={disabled || values.length >= 10}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault()
-              addThreshold()
-            }
-          }}
-        />
-        <Button
-          type="button"
-          variant="secondary"
-          disabled={disabled || values.length >= 10}
-          onClick={addThreshold}
-        >
-          Добавить
-        </Button>
-      </div>
-    </div>
-  )
-}
-
 export function RemindersPage() {
   const { confirm } = useConfirmDialog()
   const { data: settings } = useSettings()
   const { data: reminders, isLoading, isError, refetch } = useReminders()
-  const {
-    data: categoryLimits,
-    isLoading: limitsLoading,
-  } = useCategoryLimits()
   const createReminder = useCreateReminder()
   const updateReminder = useUpdateReminder()
   const deleteReminder = useDeleteReminder()
-  const createLimit = useCreateCategoryLimit()
-  const updateLimit = useUpdateCategoryLimit()
-  const deleteLimit = useDeleteCategoryLimit()
 
   const [editing, setEditing] = useState<Reminder | null>(null)
   const [showForm, setShowForm] = useState(false)
@@ -169,27 +83,11 @@ export function RemindersPage() {
   const [audience, setAudience] = useState<ReminderAudience>('Self')
   const [isEnabled, setIsEnabled] = useState(true)
 
-  const [showLimitForm, setShowLimitForm] = useState(false)
-  const [editingLimit, setEditingLimit] = useState<CategorySpendingLimit | null>(null)
-  const [limitCategoryId, setLimitCategoryId] = useState('')
-  const [limitAmount, setLimitAmount] = useState('')
-  const [limitThresholds, setLimitThresholds] = useState<number[]>([50, 80])
-  const [limitAudience, setLimitAudience] = useState<ReminderAudience>('Self')
-  const [limitEnabled, setLimitEnabled] = useState(true)
-
   const isPersonal = settings?.isPersonal ?? true
   const audienceOptions = [
     { value: 'Self', label: 'Только я' },
     ...(!isPersonal ? [{ value: 'Family', label: 'Вся семья' }] : []),
   ]
-
-  const expenseCategories = useMemo(
-    () =>
-      (settings?.categories ?? []).filter(
-        (c) => !c.kind || c.kind === 'Expense',
-      ),
-    [settings?.categories],
-  )
 
   const { standard, custom } = useMemo(() => {
     const list = reminders ?? []
@@ -224,33 +122,6 @@ export function RemindersPage() {
     setEditing(null)
   }
 
-  function openCreateLimit() {
-    setEditingLimit(null)
-    setLimitCategoryId(expenseCategories[0]?.id ?? '')
-    setLimitAmount('')
-    setLimitThresholds([50, 80])
-    setLimitAudience('Self')
-    setLimitEnabled(true)
-    setShowLimitForm(true)
-  }
-
-  function openEditLimit(limit: CategorySpendingLimit) {
-    setEditingLimit(limit)
-    setLimitCategoryId(limit.categoryId)
-    setLimitAmount(String(limit.limitAmount))
-    setLimitThresholds(normalizeThresholds(limit.thresholdPercents ?? []))
-    setLimitAudience(
-      limit.audience === 'Family' && !isPersonal ? 'Family' : 'Self',
-    )
-    setLimitEnabled(limit.isEnabled)
-    setShowLimitForm(true)
-  }
-
-  function closeLimitForm() {
-    setShowLimitForm(false)
-    setEditingLimit(null)
-  }
-
   async function handleSubmit(event: FormEvent) {
     event.preventDefault()
     const trimmed = message.trim()
@@ -276,35 +147,6 @@ export function RemindersPage() {
       })
     }
     closeForm()
-  }
-
-  async function handleLimitSubmit(event: FormEvent) {
-    event.preventDefault()
-    const amount = Number.parseFloat(limitAmount.replace(',', '.'))
-    if (!limitCategoryId || Number.isNaN(amount) || amount <= 0) return
-    const thresholds = normalizeThresholds(limitThresholds)
-    if (thresholds.length === 0) return
-
-    const nextAudience: ReminderAudience =
-      limitAudience === 'Family' && !isPersonal ? 'Family' : 'Self'
-
-    if (editingLimit) {
-      await updateLimit.mutateAsync({
-        id: editingLimit.id,
-        limitAmount: amount,
-        thresholdPercents: thresholds,
-        audience: nextAudience,
-        isEnabled: limitEnabled,
-      })
-    } else {
-      await createLimit.mutateAsync({
-        categoryId: limitCategoryId,
-        limitAmount: amount,
-        thresholdPercents: thresholds,
-        audience: nextAudience,
-      })
-    }
-    closeLimitForm()
   }
 
   async function toggleStandard(reminder: Reminder, enabled: boolean) {
@@ -353,7 +195,7 @@ export function RemindersPage() {
     })
   }
 
-  if (isLoading || limitsLoading) {
+  if (isLoading) {
     return (
       <div className="flex justify-center py-20">
         <Spinner />
@@ -374,16 +216,11 @@ export function RemindersPage() {
     )
   }
 
-  const usedCategoryIds = new Set((categoryLimits ?? []).map((l) => l.categoryId))
-  const availableCategories = expenseCategories.filter(
-    (c) => !usedCategoryIds.has(c.id) || c.id === editingLimit?.categoryId,
-  )
-
   return (
     <div className="space-y-6">
       <PageHeader
         title="Напоминания"
-        subtitle="Стандартные уведомления, лимиты категорий и свои тексты в Telegram"
+        subtitle="Стандартные уведомления и свои тексты в Telegram. Лимиты по категориям — в Настройках → Категории и лимиты."
         action={
           !showForm ? (
             <Button onClick={openCreate}>Своё напоминание</Button>
@@ -459,144 +296,6 @@ export function RemindersPage() {
               </li>
             )
           })}
-        </ul>
-      </Card>
-
-      <Card>
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <CardTitle>Лимиты по категориям</CardTitle>
-            <p className="mt-1 text-sm text-slate-500">
-              Сумма на текущий бюджетный период и пороги %. Уведомление при расходе в этой
-              категории.
-            </p>
-          </div>
-          {!showLimitForm && (
-            <Button
-              variant="secondary"
-              onClick={openCreateLimit}
-              disabled={availableCategories.length === 0 && !editingLimit}
-            >
-              Добавить лимит
-            </Button>
-          )}
-        </div>
-
-        {showLimitForm && (
-          <form className="mt-4 space-y-4 border-t border-slate-100 pt-4" onSubmit={(e) => void handleLimitSubmit(e)}>
-            {!editingLimit && (
-              <Select
-                label="Категория"
-                value={limitCategoryId}
-                onChange={(e) => setLimitCategoryId(e.target.value)}
-                options={availableCategories.map((c) => ({
-                  value: c.id,
-                  label: c.name,
-                }))}
-                required
-              />
-            )}
-            {editingLimit && (
-              <p className="text-sm font-medium text-slate-800">{editingLimit.categoryName}</p>
-            )}
-            <Input
-              label={`Лимит (${settings?.baseCurrency ?? 'RSD'})`}
-              type="number"
-              min={0.01}
-              step="0.01"
-              value={limitAmount}
-              onChange={(e) => setLimitAmount(e.target.value)}
-              required
-            />
-            <ThresholdEditor values={limitThresholds} onChange={setLimitThresholds} />
-            {!isPersonal && (
-              <Select
-                label="Кому"
-                value={limitAudience}
-                onChange={(e) => setLimitAudience(e.target.value as ReminderAudience)}
-                options={audienceOptions}
-              />
-            )}
-            {editingLimit && (
-              <label className="flex items-center gap-2 text-sm text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={limitEnabled}
-                  onChange={(e) => setLimitEnabled(e.target.checked)}
-                  className="size-4 rounded border-slate-300"
-                />
-                Включено
-              </label>
-            )}
-            <div className="flex flex-wrap gap-2">
-              <Button
-                type="submit"
-                loading={createLimit.isPending || updateLimit.isPending}
-              >
-                {editingLimit ? 'Сохранить' : 'Создать'}
-              </Button>
-              <Button type="button" variant="secondary" onClick={closeLimitForm}>
-                Отмена
-              </Button>
-            </div>
-          </form>
-        )}
-
-        <ul className="mt-4 divide-y divide-slate-100">
-          {(categoryLimits ?? []).length === 0 && !showLimitForm ? (
-            <li className="py-2">
-              <EmptyState
-                title="Лимитов пока нет"
-                description="Задайте лимит на категорию и пороги, например 50% и 80%."
-                action={<Button onClick={openCreateLimit}>Добавить лимит</Button>}
-              />
-            </li>
-          ) : (
-            (categoryLimits ?? []).map((limit) => (
-              <li
-                key={limit.id}
-                className="flex flex-col gap-3 py-4 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between"
-              >
-                <div className="min-w-0 space-y-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="font-medium text-slate-900">{limit.categoryName}</p>
-                    {!limit.isEnabled && <Badge>Выкл</Badge>}
-                    {limit.audience === 'Family' && <Badge>Семья</Badge>}
-                  </div>
-                  <p className="text-sm text-slate-500">
-                    {limit.limitAmount} {settings?.baseCurrency ?? ''} · пороги{' '}
-                    {(limit.thresholdPercents ?? []).map((t) => `${t}%`).join(', ') || '—'}
-                  </p>
-                </div>
-                {limit.canEdit && (
-                  <div className="flex shrink-0 flex-wrap gap-2">
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => openEditLimit(limit)}
-                    >
-                      Изменить
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-red-600"
-                      loading={deleteLimit.isPending}
-                      onClick={async () => {
-                        const accepted = await confirm({
-                          title: 'Удалить лимит?',
-                          message: `Лимит для «${limit.categoryName}» будет удалён.`,
-                        })
-                        if (accepted) void deleteLimit.mutateAsync(limit.id)
-                      }}
-                    >
-                      Удалить
-                    </Button>
-                  </div>
-                )}
-              </li>
-            ))
-          )}
         </ul>
       </Card>
 
