@@ -160,6 +160,7 @@ public interface INotificationService
 {
     Task SendTelegramAsync(long telegramUserId, string message, CancellationToken ct = default);
     Task NotifyContextMembersAsync(Guid contextId, string message, CancellationToken ct = default);
+    Task NotifyTelegramUsersAsync(IEnumerable<long> telegramUserIds, string message, CancellationToken ct = default);
     Task SubscribeWebPushAsync(Guid userId, string endpoint, string p256dh, string auth, CancellationToken ct = default);
     Task SendWebPushAsync(Guid userId, string title, string body, CancellationToken ct = default);
     Task DispatchWebhooksAsync(Guid userId, string eventType, object payload, CancellationToken ct = default);
@@ -183,7 +184,7 @@ public interface IReminderService
         TimeOnly? timeUtc,
         Domain.Enums.ReminderAudience audience,
         Domain.Enums.ReminderKind kind,
-        int? thresholdPercent,
+        IReadOnlyList<int>? thresholdPercents,
         bool isPersonalContext,
         CancellationToken ct = default);
     Task<Reminder> UpdateAsync(
@@ -193,13 +194,15 @@ public interface IReminderService
         TimeOnly? timeUtc,
         Domain.Enums.ReminderAudience audience,
         bool isEnabled,
-        int? thresholdPercent,
+        IReadOnlyList<int>? thresholdPercents,
         bool isPersonalContext,
         CancellationToken ct = default);
     Task DeleteAsync(Guid id, Guid userId, CancellationToken ct = default);
     Task<IReadOnlyList<Reminder>> GetDueTimedAsync(TimeOnly timeUtc, DateOnly todayUtc, CancellationToken ct = default);
     Task<IReadOnlyList<Reminder>> GetEnabledBudgetAlertsAsync(Guid contextId, CancellationToken ct = default);
     Task MarkFiredAsync(Guid id, DateOnly todayUtc, CancellationToken ct = default);
+    Task<IReadOnlySet<int>> GetFiredThresholdsAsync(Guid reminderId, DateOnly todayUtc, CancellationToken ct = default);
+    Task MarkThresholdsFiredAsync(Guid reminderId, IEnumerable<int> thresholds, DateOnly todayUtc, CancellationToken ct = default);
 }
 
 public record BudgetAlertInfo(
@@ -211,11 +214,56 @@ public record BudgetAlertInfo(
 public interface IBudgetAlertService
 {
     /// <summary>
-    /// Проверка после записи расхода. При notifyViaTelegram — шлёт в Telegram (не чаще раза в сутки на reminder).
+    /// Проверка после записи расхода. При notifyViaTelegram — шлёт в Telegram (каждый порог не чаще раза в сутки).
     /// </summary>
     Task<BudgetAlertInfo?> EvaluateAfterExpenseAsync(
         Guid contextId,
         Guid actingUserId,
+        bool notifyViaTelegram,
+        CancellationToken ct = default);
+}
+
+public interface IUserActivityService
+{
+    Task TouchAsync(Guid userId, Guid contextId, Domain.Enums.UserActivityKind kind, CancellationToken ct = default);
+    Task<bool> WasActiveWithinAsync(Guid userId, Guid contextId, TimeSpan window, CancellationToken ct = default);
+    Task<bool> WasRecordedWithinAsync(Guid userId, Guid contextId, TimeSpan window, CancellationToken ct = default);
+}
+
+public record CategoryLimitAlertInfo(
+    string Message,
+    Guid CategoryId,
+    string CategoryName,
+    int PercentUsed,
+    int ThresholdPercent,
+    bool OverLimit);
+
+public interface ICategorySpendingLimitService
+{
+    Task<IReadOnlyList<CategorySpendingLimit>> ListAsync(Guid contextId, Guid userId, CancellationToken ct = default);
+    Task<CategorySpendingLimit> CreateAsync(
+        Guid contextId,
+        Guid userId,
+        Guid categoryId,
+        decimal limitAmount,
+        IReadOnlyList<int>? thresholdPercents,
+        Domain.Enums.ReminderAudience audience,
+        bool isPersonalContext,
+        CancellationToken ct = default);
+    Task<CategorySpendingLimit> UpdateAsync(
+        Guid id,
+        Guid userId,
+        decimal limitAmount,
+        IReadOnlyList<int>? thresholdPercents,
+        Domain.Enums.ReminderAudience audience,
+        bool isEnabled,
+        bool isPersonalContext,
+        CancellationToken ct = default);
+    Task DeleteAsync(Guid id, Guid userId, CancellationToken ct = default);
+    Task<IReadOnlyList<CategoryLimitAlertInfo>> EvaluateAfterExpenseAsync(
+        Guid contextId,
+        Guid actingUserId,
+        Guid? categoryId,
         bool notifyViaTelegram,
         CancellationToken ct = default);
 }

@@ -1,3 +1,4 @@
+using FamLedger.Common;
 using FamLedger.Domain.Entities;
 using FamLedger.Domain.Enums;
 using FamLedger.Interfaces.Services;
@@ -61,7 +62,9 @@ public class ReminderService(AppDbContext db) : IReminderService
                 Kind = kind,
                 Message = null,
                 TimeUtc = DefaultTimeUtc(kind),
-                ThresholdPercent = kind == ReminderKind.BudgetAlert ? 80 : null,
+                ThresholdPercents = kind == ReminderKind.BudgetAlert
+                    ? ThresholdPercentHelper.DefaultBudgetAlert
+                    : [],
                 Audience = audience,
                 IsEnabled = false,
                 CreatedAtUtc = now,
@@ -81,7 +84,7 @@ public class ReminderService(AppDbContext db) : IReminderService
         TimeOnly? timeUtc,
         ReminderAudience audience,
         ReminderKind kind,
-        int? thresholdPercent,
+        IReadOnlyList<int>? thresholdPercents,
         bool isPersonalContext,
         CancellationToken ct = default)
     {
@@ -118,7 +121,7 @@ public class ReminderService(AppDbContext db) : IReminderService
         TimeOnly? timeUtc,
         ReminderAudience audience,
         bool isEnabled,
-        int? thresholdPercent,
+        IReadOnlyList<int>? thresholdPercents,
         bool isPersonalContext,
         CancellationToken ct = default)
     {
@@ -146,9 +149,8 @@ public class ReminderService(AppDbContext db) : IReminderService
             }
 
             if (reminder.Kind == ReminderKind.BudgetAlert)
-                reminder.ThresholdPercent = thresholdPercent is > 0 and <= 100
-                    ? thresholdPercent
-                    : reminder.ThresholdPercent ?? 80;
+                reminder.ThresholdPercents = ThresholdPercentHelper.Normalize(
+                    thresholdPercents, ThresholdPercentHelper.DefaultBudgetAlert);
 
             if (reminder.Kind == ReminderKind.EveningCheckIn && !string.IsNullOrWhiteSpace(message))
                 reminder.Message = ValidateMessage(message, required: false);
@@ -217,6 +219,53 @@ public class ReminderService(AppDbContext db) : IReminderService
         if (reminder is null) return;
         reminder.LastFiredDateUtc = todayUtc;
         reminder.UpdatedAtUtc = DateTime.UtcNow;
+        await db.SaveChangesAsync(ct);
+    }
+
+    public async Task<IReadOnlySet<int>> GetFiredThresholdsAsync(
+        Guid reminderId,
+        DateOnly todayUtc,
+        CancellationToken ct = default)
+    {
+        var fired = await db.ReminderThresholdFires
+            .AsNoTracking()
+            .Where(f => f.ReminderId == reminderId && f.LastFiredDateUtc == todayUtc)
+            .Select(f => f.ThresholdPercent)
+            .ToListAsync(ct);
+        return fired.ToHashSet();
+    }
+
+    public async Task MarkThresholdsFiredAsync(
+        Guid reminderId,
+        IEnumerable<int> thresholds,
+        DateOnly todayUtc,
+        CancellationToken ct = default)
+    {
+        var list = thresholds.Distinct().ToList();
+        if (list.Count == 0) return;
+
+        var existing = await db.ReminderThresholdFires
+            .Where(f => f.ReminderId == reminderId && list.Contains(f.ThresholdPercent))
+            .ToListAsync(ct);
+
+        foreach (var threshold in list)
+        {
+            var row = existing.FirstOrDefault(f => f.ThresholdPercent == threshold);
+            if (row is null)
+            {
+                db.ReminderThresholdFires.Add(new ReminderThresholdFire
+                {
+                    ReminderId = reminderId,
+                    ThresholdPercent = threshold,
+                    LastFiredDateUtc = todayUtc,
+                });
+            }
+            else
+            {
+                row.LastFiredDateUtc = todayUtc;
+            }
+        }
+
         await db.SaveChangesAsync(ct);
     }
 

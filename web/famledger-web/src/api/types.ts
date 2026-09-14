@@ -65,10 +65,20 @@ export interface BudgetAlertPayload {
   overBudget: boolean
 }
 
+export interface CategoryLimitAlertPayload {
+  message: string
+  categoryId: string
+  categoryName: string
+  percentUsed: number
+  thresholdPercent: number
+  overLimit: boolean
+}
+
 export interface CreateTransactionResponse {
   id: string
   kind: string
   budgetAlert?: BudgetAlertPayload | null
+  categoryLimitAlert?: CategoryLimitAlertPayload | null
 }
 
 export interface RecurringExpense {
@@ -262,10 +272,25 @@ export interface Reminder {
   kind: ReminderKind
   message?: string | null
   timeUtc?: string | null
-  thresholdPercent?: number | null
+  thresholdPercents?: number[]
   audience: ReminderAudience
   isEnabled: boolean
   isStandard?: boolean
+  createdByUserId: string
+  createdByName?: string
+  canEdit: boolean
+  createdAtUtc: string
+  updatedAtUtc: string
+}
+
+export interface CategorySpendingLimit {
+  id: string
+  categoryId: string
+  categoryName: string
+  limitAmount: number
+  thresholdPercents: number[]
+  audience: ReminderAudience
+  isEnabled: boolean
   createdByUserId: string
   createdByName?: string
   canEdit: boolean

@@ -36,7 +36,15 @@ public class NotificationService(
             .Select(m => m.User.TelegramUserId)
             .ToListAsync(ct);
 
-        foreach (var tgId in userIds)
+        await NotifyTelegramUsersAsync(userIds, message, ct);
+    }
+
+    public async Task NotifyTelegramUsersAsync(
+        IEnumerable<long> telegramUserIds,
+        string message,
+        CancellationToken ct = default)
+    {
+        foreach (var tgId in telegramUserIds.Distinct())
             await SendTelegramAsync(tgId, message, ct);
     }
 

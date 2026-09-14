@@ -11,7 +11,8 @@ public class ExpenseService(
     AppDbContext db,
     IBudgetPeriodService periodService,
     IExchangeRateService exchangeRateService,
-    IRedisService redis) : IExpenseService
+    IRedisService redis,
+    IUserActivityService userActivity) : IExpenseService
 {
     public async Task<Transaction> AddAsync(
         Guid contextId,
@@ -47,6 +48,7 @@ public class ExpenseService(
         db.Transactions.Add(tx);
         await db.SaveChangesAsync(ct);
         await redis.DeleteAsync(CacheKeys.BudgetSummary(period.Id));
+        await userActivity.TouchAsync(userId, contextId, UserActivityKind.Transaction, ct);
         return tx;
     }
 

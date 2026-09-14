@@ -82,6 +82,13 @@ export function DashboardPage() {
       showToast({ title, message, tone: 'warning' })
     }
 
+    if (result.categoryLimitAlert) {
+      const lines = result.categoryLimitAlert.message.split('\n')
+      const title = lines[0] ?? 'Лимит категории'
+      const message = lines.slice(1).join('\n') || undefined
+      showToast({ title, message, tone: 'warning' })
+    }
+
     setAmount('')
     setNote('')
   }

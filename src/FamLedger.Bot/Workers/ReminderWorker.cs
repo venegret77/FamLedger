@@ -8,6 +8,8 @@ namespace FamLedger.Bot.Workers;
 
 public class ReminderWorker(IServiceScopeFactory scopeFactory, ILogger<ReminderWorker> logger) : BackgroundService
 {
+    private static readonly TimeSpan QuietWindow = TimeSpan.FromHours(1);
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)
@@ -39,6 +41,7 @@ public class ReminderWorker(IServiceScopeFactory scopeFactory, ILogger<ReminderW
         var calculator = scope.ServiceProvider.GetRequiredService<IBudgetCalculatorService>();
         var periodService = scope.ServiceProvider.GetRequiredService<IBudgetPeriodService>();
         var debtService = scope.ServiceProvider.GetRequiredService<IDebtService>();
+        var activity = scope.ServiceProvider.GetRequiredService<IUserActivityService>();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         var now = DateTime.UtcNow;
@@ -54,7 +57,15 @@ public class ReminderWorker(IServiceScopeFactory scopeFactory, ILogger<ReminderW
                     reminder, calculator, periodService, debtService, db, todayUtc, ct);
                 if (message is null) continue;
 
-                await SendAsync(notifications, reminder, message, ct);
+                var recipients = await ResolveRecipientsAsync(db, reminder, ct);
+                recipients = await FilterByActivityAsync(activity, reminder, recipients, ct);
+
+                if (recipients.Count > 0)
+                {
+                    await notifications.NotifyTelegramUsersAsync(
+                        recipients.Select(r => r.TelegramUserId), message, ct);
+                }
+
                 await reminders.MarkFiredAsync(reminder.Id, todayUtc, ct);
             }
             catch (Exception ex)
@@ -129,21 +140,13 @@ public class ReminderWorker(IServiceScopeFactory scopeFactory, ILogger<ReminderW
                 if (context is null) return null;
                 var period = await periodService.EnsureActivePeriodAsync(context, ct);
                 var items = await db.PeriodRecurringItems
-                    .AsNoTracking()
                     .Include(i => i.RecurringExpense)
-                    .Where(i =>
-                        i.PeriodId == period.Id &&
-                        !i.IsPaid &&
-                        !i.IsSkipped)
+                    .Where(i => i.PeriodId == period.Id && !i.IsPaid && !i.IsSkipped)
                     .ToListAsync(ct);
 
                 var due = items
-                    .Select(i =>
-                    {
-                        var chargeDate = ResolveChargeDateInPeriod(period, i.RecurringExpense.ChargeDayOfMonth);
-                        return (Item: i, ChargeDate: chargeDate);
-                    })
-                    .Where(x => x.ChargeDate is { } d && d <= todayUtc)
+                    .Select(item => (Item: item, ChargeDate: ResolveChargeDateInPeriod(period, item.RecurringExpense.ChargeDayOfMonth)))
+                    .Where(x => x.ChargeDate is not null && x.ChargeDate <= todayUtc)
                     .OrderBy(x => x.ChargeDate)
                     .ToList();
 
@@ -166,9 +169,6 @@ public class ReminderWorker(IServiceScopeFactory scopeFactory, ILogger<ReminderW
         }
     }
 
-    /// <summary>
-    /// Дата списания внутри периода: день ChargeDayOfMonth между Start и End.
-    /// </summary>
     private static DateOnly? ResolveChargeDateInPeriod(Domain.Entities.BudgetPeriod period, int chargeDay)
     {
         chargeDay = Math.Clamp(chargeDay, 1, 28);
@@ -180,15 +180,43 @@ public class ReminderWorker(IServiceScopeFactory scopeFactory, ILogger<ReminderW
         return null;
     }
 
-    private static async Task SendAsync(
-        INotificationService notifications,
+    private static async Task<List<(Guid UserId, long TelegramUserId)>> ResolveRecipientsAsync(
+        AppDbContext db,
         Domain.Entities.Reminder reminder,
-        string message,
         CancellationToken ct)
     {
         if (reminder.Audience == ReminderAudience.Family)
-            await notifications.NotifyContextMembersAsync(reminder.ContextId, message, ct);
-        else
-            await notifications.SendTelegramAsync(reminder.CreatedByUser.TelegramUserId, message, ct);
+        {
+            return await db.ContextMembers
+                .AsNoTracking()
+                .Where(m => m.ContextId == reminder.ContextId)
+                .Select(m => new ValueTuple<Guid, long>(m.UserId, m.User.TelegramUserId))
+                .ToListAsync(ct);
+        }
+
+        if (reminder.CreatedByUser is null) return [];
+        return [(reminder.CreatedByUserId, reminder.CreatedByUser.TelegramUserId)];
+    }
+
+    private static async Task<List<(Guid UserId, long TelegramUserId)>> FilterByActivityAsync(
+        IUserActivityService activity,
+        Domain.Entities.Reminder reminder,
+        List<(Guid UserId, long TelegramUserId)> recipients,
+        CancellationToken ct)
+    {
+        if (reminder.Kind is not (ReminderKind.DailyBalance or ReminderKind.EveningCheckIn))
+            return recipients;
+
+        var filtered = new List<(Guid UserId, long TelegramUserId)>();
+        foreach (var recipient in recipients)
+        {
+            var skip = reminder.Kind == ReminderKind.DailyBalance
+                ? await activity.WasActiveWithinAsync(recipient.UserId, reminder.ContextId, QuietWindow, ct)
+                : await activity.WasRecordedWithinAsync(recipient.UserId, reminder.ContextId, QuietWindow, ct);
+            if (!skip)
+                filtered.Add(recipient);
+        }
+
+        return filtered;
     }
 }

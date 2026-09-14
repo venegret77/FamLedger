@@ -28,6 +28,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<NotificationSubscription> NotificationSubscriptions => Set<NotificationSubscription>();
     public DbSet<WebhookEndpoint> WebhookEndpoints => Set<WebhookEndpoint>();
     public DbSet<Reminder> Reminders => Set<Reminder>();
+    public DbSet<ReminderThresholdFire> ReminderThresholdFires => Set<ReminderThresholdFire>();
+    public DbSet<UserActivityState> UserActivityStates => Set<UserActivityState>();
+    public DbSet<CategorySpendingLimit> CategorySpendingLimits => Set<CategorySpendingLimit>();
+    public DbSet<CategoryLimitThresholdFire> CategoryLimitThresholdFires => Set<CategoryLimitThresholdFire>();
     public DbSet<PeriodReconciliation> PeriodReconciliations => Set<PeriodReconciliation>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -238,8 +242,47 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasIndex(x => new { x.IsEnabled, x.TimeUtc });
             e.HasIndex(x => new { x.ContextId, x.Kind, x.CreatedByUserId });
             e.Property(x => x.Message).HasMaxLength(1000);
+            e.Property(x => x.ThresholdPercents);
             e.HasOne(x => x.Context).WithMany(x => x.Reminders).HasForeignKey(x => x.ContextId);
             e.HasOne(x => x.CreatedByUser).WithMany().HasForeignKey(x => x.CreatedByUserId);
+        });
+
+        modelBuilder.Entity<ReminderThresholdFire>(e =>
+        {
+            e.ToTable("reminder_threshold_fires");
+            e.HasKey(x => new { x.ReminderId, x.ThresholdPercent });
+            e.HasOne(x => x.Reminder).WithMany(x => x.ThresholdFires).HasForeignKey(x => x.ReminderId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<UserActivityState>(e =>
+        {
+            e.ToTable("user_activity_states");
+            e.HasKey(x => new { x.UserId, x.ContextId });
+            e.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Context).WithMany().HasForeignKey(x => x.ContextId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<CategorySpendingLimit>(e =>
+        {
+            e.ToTable("category_spending_limits");
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.ContextId, x.CategoryId }).IsUnique();
+            e.Property(x => x.LimitAmount).HasPrecision(18, 2);
+            e.Property(x => x.ThresholdPercents);
+            e.HasOne(x => x.Context).WithMany().HasForeignKey(x => x.ContextId);
+            e.HasOne(x => x.Category).WithMany().HasForeignKey(x => x.CategoryId);
+            e.HasOne(x => x.CreatedByUser).WithMany().HasForeignKey(x => x.CreatedByUserId);
+        });
+
+        modelBuilder.Entity<CategoryLimitThresholdFire>(e =>
+        {
+            e.ToTable("category_limit_threshold_fires");
+            e.HasKey(x => new { x.LimitId, x.ThresholdPercent });
+            e.HasOne(x => x.Limit).WithMany(x => x.ThresholdFires).HasForeignKey(x => x.LimitId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<PeriodReconciliation>(e =>

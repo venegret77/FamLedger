@@ -16,6 +16,7 @@ import type {
   RecurringExpense,
   Reminder,
   ReminderAudience,
+  CategorySpendingLimit,
   ReconciliationManualInput,
   ReconciliationView,
   SavingsResponse,
@@ -40,6 +41,7 @@ export const queryKeys = {
   categories: ['categories'] as const,
   contexts: ['contexts'] as const,
   reminders: ['reminders'] as const,
+  categoryLimits: ['category-limits'] as const,
   reconciliation: ['reconciliation'] as const,
 }
 
@@ -850,7 +852,7 @@ export function useUpdateReminder() {
       timeUtc?: string | null
       audience: ReminderAudience
       isEnabled: boolean
-      thresholdPercent?: number | null
+      thresholdPercents?: number[]
     }) =>
       apiFetch<Reminder>(`/api/reminders/${id}`, {
         method: 'PUT',
@@ -869,6 +871,66 @@ export function useDeleteReminder() {
       apiFetch<void>(`/api/reminders/${id}`, { method: 'DELETE' }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.reminders })
+    },
+  })
+}
+
+export function useCategoryLimits() {
+  return useQuery({
+    queryKey: queryKeys.categoryLimits,
+    queryFn: () => apiFetch<CategorySpendingLimit[]>('/api/category-limits'),
+  })
+}
+
+export function useCreateCategoryLimit() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (payload: {
+      categoryId: string
+      limitAmount: number
+      thresholdPercents: number[]
+      audience: ReminderAudience
+    }) =>
+      apiFetch<CategorySpendingLimit>('/api/category-limits', {
+        method: 'POST',
+        body: payload,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.categoryLimits })
+    },
+  })
+}
+
+export function useUpdateCategoryLimit() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      id,
+      ...payload
+    }: {
+      id: string
+      limitAmount: number
+      thresholdPercents: number[]
+      audience: ReminderAudience
+      isEnabled: boolean
+    }) =>
+      apiFetch<CategorySpendingLimit>(`/api/category-limits/${id}`, {
+        method: 'PUT',
+        body: payload,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.categoryLimits })
+    },
+  })
+}
+
+export function useDeleteCategoryLimit() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<void>(`/api/category-limits/${id}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.categoryLimits })
     },
   })
 }

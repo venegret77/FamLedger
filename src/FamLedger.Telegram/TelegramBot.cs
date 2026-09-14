@@ -53,12 +53,19 @@ public class TelegramBot(
         var periodService = sp.GetRequiredService<IBudgetPeriodService>();
         var debtService = sp.GetRequiredService<IDebtService>();
         var budgetAlertService = sp.GetRequiredService<IBudgetAlertService>();
+        var categoryLimitService = sp.GetRequiredService<ICategorySpendingLimitService>();
+        var userActivity = sp.GetRequiredService<IUserActivityService>();
 
         if (update.Message is { Text: not null } msg)
         {
             var chatId = msg.Chat.Id;
             var telegramUserId = msg.From?.Id ?? chatId;
             var user = await userService.GetOrCreateByTelegramAsync(telegramUserId, msg.From?.Username, msg.From?.FirstName, ct);
+            if (user.ActiveContextId is not null)
+            {
+                await userActivity.TouchAsync(
+                    user.Id, user.ActiveContextId.Value, UserActivityKind.Telegram, ct);
+            }
             var (command, payload) = ParseIntent(msg.Text);
 
             if (command is "start")
@@ -203,11 +210,17 @@ public class TelegramBot(
             var telegramUserId = cb.From.Id;
             var user = await userService.GetOrCreateByTelegramAsync(
                 telegramUserId, cb.From.Username, cb.From.FirstName, ct);
+            if (user.ActiveContextId is not null)
+            {
+                await userActivity.TouchAsync(
+                    user.Id, user.ActiveContextId.Value, UserActivityKind.Telegram, ct);
+            }
 
             if (cb.Data.StartsWith("cat:"))
             {
                 await HandleCategoryCallbackAsync(
-                    client, cb, chatId, user, dialogState, expenseService, budgetAlertService, ct);
+                    client, cb, chatId, user, dialogState, expenseService,
+                    budgetAlertService, categoryLimitService, ct);
                 return;
             }
 
@@ -382,6 +395,7 @@ public class TelegramBot(
         IDialogStateService dialogState,
         IExpenseService expenseService,
         IBudgetAlertService budgetAlertService,
+        ICategorySpendingLimitService categoryLimitService,
         CancellationToken ct)
     {
         var payload = cb.Data!["cat:".Length..];
@@ -417,6 +431,8 @@ public class TelegramBot(
         {
             await budgetAlertService.EvaluateAfterExpenseAsync(
                 contextId, user.Id, notifyViaTelegram: true, ct);
+            await categoryLimitService.EvaluateAfterExpenseAsync(
+                contextId, user.Id, categoryId, notifyViaTelegram: true, ct);
         }
     }
 

@@ -25,6 +25,7 @@ public class BudgetController(
     IGoalService goalService,
     IExchangeRateService exchangeRateService,
     IBudgetAlertService budgetAlertService,
+    ICategorySpendingLimitService categoryLimitService,
     IReconciliationService reconciliationService) : ControllerBase
 {
     private async Task<(Domain.Entities.BudgetContext Context, Domain.Entities.BudgetPeriod Period)> GetActiveContextAsync(CancellationToken ct)
@@ -211,10 +212,14 @@ public class BudgetController(
             ct);
 
         BudgetAlertInfo? budgetAlert = null;
+        CategoryLimitAlertInfo? categoryLimitAlert = null;
         if (kind == Domain.Enums.TransactionKind.Expense)
         {
             budgetAlert = await budgetAlertService.EvaluateAfterExpenseAsync(
                 context.Id, userId, notifyViaTelegram: false, ct);
+            var categoryAlerts = await categoryLimitService.EvaluateAfterExpenseAsync(
+                context.Id, userId, tx.CategoryId, notifyViaTelegram: false, ct);
+            categoryLimitAlert = categoryAlerts.FirstOrDefault();
         }
 
         return Ok(new
@@ -229,6 +234,17 @@ public class BudgetController(
                     budgetAlert.PercentUsed,
                     budgetAlert.ThresholdPercent,
                     budgetAlert.OverBudget
+                },
+            categoryLimitAlert = categoryLimitAlert is null
+                ? null
+                : new
+                {
+                    categoryLimitAlert.Message,
+                    categoryLimitAlert.CategoryId,
+                    categoryLimitAlert.CategoryName,
+                    categoryLimitAlert.PercentUsed,
+                    categoryLimitAlert.ThresholdPercent,
+                    categoryLimitAlert.OverLimit
                 }
         });
     }

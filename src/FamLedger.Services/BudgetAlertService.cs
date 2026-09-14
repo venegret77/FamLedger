@@ -27,6 +27,13 @@ public class BudgetAlertService(
         var period = await periodService.EnsureActivePeriodAsync(context, ct);
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         var summary = await calculator.CalculateAsync(context, period, today, ct);
+        var percent = BudgetSummaryFormatter.TryGetDailySpendPercent(summary);
+        if (percent is null && summary.AvailableToday >= 0)
+            return null;
+
+        var percentUsed = percent ?? 100;
+        if (summary.AvailableToday < 0 && percentUsed < 100)
+            percentUsed = 100;
 
         BudgetAlertInfo? forClient = null;
 
@@ -36,25 +43,35 @@ public class BudgetAlertService(
                 || reminder.CreatedByUserId == actingUserId;
             if (!appliesToActor) continue;
 
-            var threshold = reminder.ThresholdPercent ?? 80;
-            if (!BudgetSummaryFormatter.IsDailyBudgetAlertTriggered(summary, threshold, out var percent))
-                continue;
+            var thresholds = ThresholdPercentHelper.Normalize(
+                reminder.ThresholdPercents, ThresholdPercentHelper.DefaultBudgetAlert);
 
+            var activeThresholds = thresholds.Where(t => percentUsed >= t).ToList();
+            if (activeThresholds.Count == 0) continue;
+
+            var highest = activeThresholds[^1];
             var message = BudgetSummaryFormatter.FormatBudgetAlert(
-                summary, context.BaseCurrency, percent, threshold);
-            var overBudget = summary.AvailableToday < 0 || percent >= 100;
-
-            forClient ??= new BudgetAlertInfo(message, percent, threshold, overBudget);
+                summary, context.BaseCurrency, percentUsed, highest);
+            var overBudget = summary.AvailableToday < 0 || percentUsed >= 100;
+            forClient ??= new BudgetAlertInfo(message, percentUsed, highest, overBudget);
 
             if (!notifyViaTelegram) continue;
-            if (reminder.LastFiredDateUtc == today) continue;
 
-            if (reminder.Audience == ReminderAudience.Family)
-                await notifications.NotifyContextMembersAsync(reminder.ContextId, message, ct);
-            else if (reminder.CreatedByUser is not null)
-                await notifications.SendTelegramAsync(reminder.CreatedByUser.TelegramUserId, message, ct);
+            var firedToday = await reminders.GetFiredThresholdsAsync(reminder.Id, today, ct);
+            var newlyCrossed = ThresholdPercentHelper.GetNewlyCrossed(thresholds, percentUsed, firedToday);
+            if (newlyCrossed.Count == 0) continue;
 
-            await reminders.MarkFiredAsync(reminder.Id, today, ct);
+            foreach (var threshold in newlyCrossed)
+            {
+                var tgMessage = BudgetSummaryFormatter.FormatBudgetAlert(
+                    summary, context.BaseCurrency, percentUsed, threshold);
+                if (reminder.Audience == ReminderAudience.Family)
+                    await notifications.NotifyContextMembersAsync(reminder.ContextId, tgMessage, ct);
+                else if (reminder.CreatedByUser is not null)
+                    await notifications.SendTelegramAsync(reminder.CreatedByUser.TelegramUserId, tgMessage, ct);
+            }
+
+            await reminders.MarkThresholdsFiredAsync(reminder.Id, newlyCrossed, today, ct);
         }
 
         return forClient;

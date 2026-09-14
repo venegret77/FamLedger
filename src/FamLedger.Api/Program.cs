@@ -77,6 +77,7 @@ app.UseForwardedHeaders();
 app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseMiddleware<FamLedger.Api.Middleware.UserActivityMiddleware>();
 app.MapControllers();
 app.MapHealthChecks("/health");
 
