@@ -266,6 +266,10 @@ public interface ICategorySpendingLimitService
         bool isPersonalContext,
         CancellationToken ct = default);
     Task DeleteAsync(Guid id, Guid userId, CancellationToken ct = default);
+    Task<IReadOnlyList<Domain.Models.CategoryLimitProgress>> GetProgressAsync(
+        Guid contextId,
+        Guid userId,
+        CancellationToken ct = default);
     Task ReconcileFiresAfterSpendChangeAsync(
         Guid contextId,
         Guid? categoryId,

@@ -94,7 +94,8 @@ public class TelegramBot(
 
             if (command is "статистика" or "stats")
             {
-                await HandleStatsAsync(client, chatId, user, contextService, periodService, calculator, ct);
+                await HandleStatsAsync(
+                    client, chatId, user, contextService, periodService, calculator, categoryLimitService, ct);
                 return;
             }
 
@@ -282,6 +283,7 @@ public class TelegramBot(
         IContextService contextService,
         IBudgetPeriodService periodService,
         IBudgetCalculatorService calculator,
+        ICategorySpendingLimitService categoryLimitService,
         CancellationToken ct)
     {
         var spendContext = await ResolveSpendContextAsync(contextService, user.Id, user.ActiveContextId, ct);
@@ -294,8 +296,10 @@ public class TelegramBot(
         var period = await periodService.EnsureActivePeriodAsync(spendContext, ct);
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         var summary = await calculator.CalculateAsync(spendContext, period, today, ct);
+        var limits = await categoryLimitService.GetProgressAsync(spendContext.Id, user.Id, ct);
         await client.SendMessage(chatId,
-            BudgetSummaryFormatter.FormatStats(summary, spendContext.BaseCurrency, spendContext.Name),
+            BudgetSummaryFormatter.FormatStats(
+                summary, spendContext.BaseCurrency, spendContext.Name, limits),
             cancellationToken: ct);
     }
 

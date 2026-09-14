@@ -42,6 +42,7 @@ public class ReminderWorker(IServiceScopeFactory scopeFactory, ILogger<ReminderW
         var periodService = scope.ServiceProvider.GetRequiredService<IBudgetPeriodService>();
         var debtService = scope.ServiceProvider.GetRequiredService<IDebtService>();
         var activity = scope.ServiceProvider.GetRequiredService<IUserActivityService>();
+        var categoryLimits = scope.ServiceProvider.GetRequiredService<ICategorySpendingLimitService>();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         var now = DateTime.UtcNow;
@@ -54,7 +55,7 @@ public class ReminderWorker(IServiceScopeFactory scopeFactory, ILogger<ReminderW
             try
             {
                 var message = await BuildTimedMessageAsync(
-                    reminder, calculator, periodService, debtService, db, todayUtc, ct);
+                    reminder, calculator, periodService, debtService, categoryLimits, db, todayUtc, ct);
                 if (message is null) continue;
 
                 var recipients = await ResolveRecipientsAsync(db, reminder, ct);
@@ -80,6 +81,7 @@ public class ReminderWorker(IServiceScopeFactory scopeFactory, ILogger<ReminderW
         IBudgetCalculatorService calculator,
         IBudgetPeriodService periodService,
         IDebtService debtService,
+        ICategorySpendingLimitService categoryLimitService,
         AppDbContext db,
         DateOnly todayUtc,
         CancellationToken ct)
@@ -100,7 +102,10 @@ public class ReminderWorker(IServiceScopeFactory scopeFactory, ILogger<ReminderW
                 if (context is null) return null;
                 var period = await periodService.EnsureActivePeriodAsync(context, ct);
                 var summary = await calculator.CalculateAsync(context, period, todayUtc, ct);
-                return BudgetSummaryFormatter.FormatStats(summary, context.BaseCurrency, context.Name);
+                var limits = await categoryLimitService.GetProgressAsync(
+                    reminder.ContextId, reminder.CreatedByUserId, ct);
+                return BudgetSummaryFormatter.FormatStats(
+                    summary, context.BaseCurrency, context.Name, limits);
             }
 
             case ReminderKind.PeriodEnding:

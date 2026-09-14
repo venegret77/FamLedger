@@ -1,6 +1,7 @@
 using FamLedger.Common;
 using FamLedger.Domain.Entities;
 using FamLedger.Domain.Enums;
+using FamLedger.Domain.Models;
 using FamLedger.Interfaces.Services;
 using FamLedger.Repository;
 using Microsoft.EntityFrameworkCore;
@@ -118,6 +119,48 @@ public class CategorySpendingLimitService(
 
         db.CategorySpendingLimits.Remove(limit);
         await db.SaveChangesAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<CategoryLimitProgress>> GetProgressAsync(
+        Guid contextId,
+        Guid userId,
+        CancellationToken ct = default)
+    {
+        var context = await db.BudgetContexts.FindAsync([contextId], ct);
+        if (context is null) return [];
+
+        var limits = await db.CategorySpendingLimits
+            .AsNoTracking()
+            .Include(l => l.Category)
+            .Where(l =>
+                l.ContextId == contextId &&
+                l.IsEnabled &&
+                (l.Audience == ReminderAudience.Family || l.CreatedByUserId == userId))
+            .OrderBy(l => l.Category.Name)
+            .ToListAsync(ct);
+        if (limits.Count == 0) return [];
+
+        var period = await periodService.EnsureActivePeriodAsync(context, ct);
+        var categoryIds = limits.Select(l => l.CategoryId).ToList();
+        var spentByCategory = await db.Transactions
+            .AsNoTracking()
+            .Where(t =>
+                t.PeriodId == period.Id &&
+                t.Kind == TransactionKind.Expense &&
+                t.CategoryId != null &&
+                categoryIds.Contains(t.CategoryId.Value))
+            .GroupBy(t => t.CategoryId!.Value)
+            .Select(g => new { CategoryId = g.Key, Spent = g.Sum(t => t.BaseAmount) })
+            .ToDictionaryAsync(x => x.CategoryId, x => x.Spent, ct);
+
+        return limits.Select(limit =>
+        {
+            spentByCategory.TryGetValue(limit.CategoryId, out var spent);
+            var percent = limit.LimitAmount <= 0
+                ? 0
+                : (int)Math.Round(spent / limit.LimitAmount * 100m, MidpointRounding.AwayFromZero);
+            return new CategoryLimitProgress(limit.Category.Name, spent, limit.LimitAmount, percent);
+        }).ToList();
     }
 
     public async Task ReconcileFiresAfterSpendChangeAsync(

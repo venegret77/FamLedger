@@ -5,7 +5,11 @@ namespace FamLedger.Common;
 
 public static class BudgetSummaryFormatter
 {
-    public static string FormatStats(BudgetSummary summary, string currency, string? contextName = null)
+    public static string FormatStats(
+        BudgetSummary summary,
+        string currency,
+        string? contextName = null,
+        IReadOnlyList<CategoryLimitProgress>? categoryLimits = null)
     {
         var sb = new StringBuilder();
         if (!string.IsNullOrWhiteSpace(contextName))
@@ -20,7 +24,30 @@ public static class BudgetSummaryFormatter
         if (summary.TopUps > 0)
             sb.AppendLine($"Пополнения: {MoneyFormatter.Format(summary.TopUps, currency)}");
         sb.Append($"Дней осталось: {summary.DaysRemaining}");
+
+        AppendCategoryLimits(sb, currency, categoryLimits);
         return sb.ToString();
+    }
+
+    public static void AppendCategoryLimits(
+        StringBuilder sb,
+        string currency,
+        IReadOnlyList<CategoryLimitProgress>? categoryLimits)
+    {
+        if (categoryLimits is null || categoryLimits.Count == 0)
+            return;
+
+        sb.AppendLine();
+        sb.AppendLine();
+        sb.Append("📌 Лимиты категорий:");
+        foreach (var limit in categoryLimits)
+        {
+            sb.AppendLine();
+            var spent = MoneyFormatter.Format(limit.Spent, currency);
+            var cap = MoneyFormatter.Format(limit.LimitAmount, currency);
+            var mark = limit.PercentUsed >= 100 ? "⚠️ " : limit.PercentUsed >= 75 ? "🟡 " : "• ";
+            sb.Append($"{mark}{limit.CategoryName}: {spent} / {cap} ({limit.PercentUsed}%)");
+        }
     }
 
     public static string FormatBudgetAlert(BudgetSummary summary, string currency, int percentUsed, int threshold)
