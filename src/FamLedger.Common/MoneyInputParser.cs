@@ -38,6 +38,12 @@ public static partial class MoneyInputParser
             ["бакс"] = CurrencyCode.Usd,
             ["бакса"] = CurrencyCode.Usd,
             ["баксов"] = CurrencyCode.Usd,
+
+            ["gel"] = CurrencyCode.Gel,
+            ["lari"] = CurrencyCode.Gel,
+            ["laris"] = CurrencyCode.Gel,
+            ["лари"] = CurrencyCode.Gel,
+            ["₾"] = CurrencyCode.Gel,
         };
 
     public static bool TryParse(string? text, out ParsedMoneyInput result, string? defaultCurrency = null)
@@ -130,6 +136,11 @@ public static partial class MoneyInputParser
             currency = CurrencyCode.Usd;
             return true;
         }
+        if (token is "₾" || token.StartsWith('₾'))
+        {
+            currency = CurrencyCode.Gel;
+            return true;
+        }
 
         return CurrencyAliases.TryGetValue(token, out currency!);
     }
@@ -137,20 +148,20 @@ public static partial class MoneyInputParser
     // optional remainder = комментарий после суммы
     private const string Tail = @"(?:\s+(?<remainder>.+))?";
 
-    [GeneratedRegex(@"^(?<symbol>[€$])\s*(?<amount>[\d\s]+(?:[.,]\d+)?)" + Tail + @"\s*$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^(?<symbol>[€$₾])\s*(?<amount>[\d\s]+(?:[.,]\d+)?)" + Tail + @"\s*$", RegexOptions.CultureInvariant)]
     private static partial Regex SymbolPrefixRegex();
 
-    [GeneratedRegex(@"^(?<amount>[\d\s]+(?:[.,]\d+)?)\s*(?<symbol>[€$])" + Tail + @"\s*$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^(?<amount>[\d\s]+(?:[.,]\d+)?)\s*(?<symbol>[€$₾])" + Tail + @"\s*$", RegexOptions.CultureInvariant)]
     private static partial Regex SymbolSuffixRegex();
 
     [GeneratedRegex(
-        @"^(?<amount>[\d\s]+(?:[.,]\d+)?)(?<code>usd|eur|rsd|euro|euros|dollar|dollars|din|dinar|евро|долл(?:ар(?:а|ов)?)?|дин(?:ар(?:а|ов)?)?)"
+        @"^(?<amount>[\d\s]+(?:[.,]\d+)?)(?<code>usd|eur|rsd|gel|euro|euros|dollar|dollars|din|dinar|lari|laris|евро|лари|долл(?:ар(?:а|ов)?)?|дин(?:ар(?:а|ов)?)?)"
         + Tail + @"\s*$",
         RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
     private static partial Regex GluedCurrencyRegex();
 
     [GeneratedRegex(
-        @"^(?:(?<code>[A-Za-zА-Яа-яЁё€$]+)\s+(?<amount>[\d\s]+(?:[.,]\d+)?)|(?<amount>[\d\s]+(?:[.,]\d+)?)\s+(?<code>[A-Za-zА-Яа-яЁё€$]+))"
+        @"^(?:(?<code>[A-Za-zА-Яа-яЁё€$₾]+)\s+(?<amount>[\d\s]+(?:[.,]\d+)?)|(?<amount>[\d\s]+(?:[.,]\d+)?)\s+(?<code>[A-Za-zА-Яа-яЁё€$₾]+))"
         + Tail + @"\s*$",
         RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
     private static partial Regex SpacedCurrencyRegex();

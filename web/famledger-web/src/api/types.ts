@@ -1,4 +1,4 @@
-export const CURRENCIES = ['RSD', 'EUR', 'USD'] as const
+export const CURRENCIES = ['RSD', 'EUR', 'USD', 'GEL'] as const
 export type CurrencyCode = (typeof CURRENCIES)[number]
 
 export const currencyOptions = CURRENCIES.map((c) => ({ value: c, label: c }))

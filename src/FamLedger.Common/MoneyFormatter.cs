@@ -11,6 +11,7 @@ public static class MoneyFormatter
         {
             "EUR" => $"{FormatDecimal(amount)} €",
             "USD" => $"${FormatDecimal(amount)}",
+            "GEL" => $"{FormatDecimal(amount)} ₾",
             _ => $"{amount.ToString("N0", Ru)} RSD"
         };
 

@@ -4,7 +4,14 @@ import { Card, CardTitle } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 import { EmptyState, PageHeader, Spinner, Tabs, Badge } from '../components/ui/Tabs'
 import { MoneyDisplay } from '../components/ui/MoneyDisplay'
+import { useToast } from '../components/ui/Toast'
 import { formatDate, formatMoney } from '../lib/format'
+import { copyToClipboard } from '../lib/clipboard'
+import {
+  buildPeriodHistoryMarkdown,
+  downloadTextFile,
+  periodReportFileName,
+} from '../lib/periodHistoryReport'
 import { Select } from '../components/ui/Input'
 
 const viewTabs = [
@@ -15,6 +22,7 @@ const viewTabs = [
 ]
 
 export function HistoryPage() {
+  const { showToast } = useToast()
   const { data: periods, isLoading, isError, refetch } = usePeriods()
   const [selectedId, setSelectedId] = useState<string>('')
   const [activeTab, setActiveTab] = useState('overview')
@@ -42,11 +50,31 @@ export function HistoryPage() {
   )
 
   const currency = detail?.currency ?? periods?.[0]?.currency ?? 'RSD'
+  const reportReady = Boolean(detail) && !detailLoading && !txLoading
 
   function titleFor(tx: { note?: string; categoryName?: string; kind?: string }) {
     if (tx.note) return tx.note
     if (tx.categoryName) return tx.categoryName
     return (tx.kind ?? 'Expense') === 'Income' ? 'Пополнение' : 'Расход'
+  }
+
+  function handleDownloadReport() {
+    if (!detail) return
+    const markdown = buildPeriodHistoryMarkdown(detail, transactions)
+    downloadTextFile(periodReportFileName(detail), markdown)
+  }
+
+  async function handleCopyReport() {
+    if (!detail) return
+    const markdown = buildPeriodHistoryMarkdown(detail, transactions)
+    const ok = await copyToClipboard(markdown)
+    showToast({
+      title: ok ? 'Отчёт скопирован' : 'Не удалось скопировать',
+      message: ok
+        ? 'Markdown в буфере — можно вставить в чат с ИИ.'
+        : 'Скачайте файл кнопкой «Скачать .md».',
+      tone: ok ? 'info' : 'warning',
+    })
   }
 
   if (isLoading) {
@@ -87,6 +115,26 @@ export function HistoryPage() {
       <PageHeader
         title="История"
         subtitle="Просмотр месяцев: сводка, категории, дни и операции"
+        action={
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={!reportReady}
+              onClick={() => void handleCopyReport()}
+            >
+              Копировать отчёт
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={!reportReady}
+              onClick={handleDownloadReport}
+            >
+              Скачать .md
+            </Button>
+          </div>
+        }
       />
 
       <Select

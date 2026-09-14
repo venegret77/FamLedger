@@ -15,6 +15,9 @@ public class ExchangeRateService(
     IRedisService redis,
     IHttpClientFactory httpClientFactory) : IExchangeRateService
 {
+    private const string NbgUsdRatesUrl =
+        "https://nbg.gov.ge/gw/api/ct/monetarypolicy/currencies/en/json?currencies=USD";
+
     public async Task<decimal> GetRateAsync(string currency, DateOnly date, Guid contextId, Guid? periodId, CancellationToken ct = default)
     {
         if (currency.Equals(CurrencyCode.Rsd, StringComparison.OrdinalIgnoreCase))
@@ -57,6 +60,7 @@ public class ExchangeRateService(
     {
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         var client = httpClientFactory.CreateClient("KursApi");
+        decimal? usdToRsd = null;
 
         foreach (var currency in new[] { CurrencyCode.Eur, CurrencyCode.Usd })
         {
@@ -69,22 +73,10 @@ public class ExchangeRateService(
                 var json = await response.Content.ReadFromJsonAsync<JsonElement>(ct);
                 if (!TryReadMiddleRate(json, out var middleRate)) continue;
 
-                var existing = await db.ExchangeRates
-                    .FirstOrDefaultAsync(r => r.Date == today && r.Currency == currency, ct);
-                if (existing is null)
-                {
-                    db.ExchangeRates.Add(new ExchangeRate
-                    {
-                        Date = today,
-                        Currency = currency,
-                        RateToRsd = middleRate
-                    });
-                }
-                else
-                {
-                    existing.RateToRsd = middleRate;
-                    existing.FetchedAt = DateTime.UtcNow;
-                }
+                await UpsertRateAsync(today, currency, middleRate, ct);
+
+                if (currency == CurrencyCode.Usd)
+                    usdToRsd = middleRate;
 
                 await redis.SetAsync(CacheKeys.FxRates(today), middleRate.ToString(System.Globalization.CultureInfo.InvariantCulture), TimeSpan.FromHours(6));
             }
@@ -94,8 +86,62 @@ public class ExchangeRateService(
             }
         }
 
+        if (usdToRsd is null)
+        {
+            usdToRsd = await db.ExchangeRates
+                .Where(r => r.Currency == CurrencyCode.Usd)
+                .OrderByDescending(r => r.Date)
+                .Select(r => (decimal?)r.RateToRsd)
+                .FirstOrDefaultAsync(ct);
+        }
+
+        await FetchAndStoreGelRateAsync(today, usdToRsd, ct);
+
         await db.SaveChangesAsync(ct);
         await RecalculateOpenPeriodAmountsAsync(ct);
+    }
+
+    private async Task FetchAndStoreGelRateAsync(DateOnly today, decimal? usdToRsd, CancellationToken ct)
+    {
+        if (usdToRsd is null or <= 0m) return;
+
+        try
+        {
+            var client = httpClientFactory.CreateClient("NbgApi");
+            var response = await client.GetAsync(NbgUsdRatesUrl, ct);
+            if (!response.IsSuccessStatusCode) return;
+
+            var json = await response.Content.ReadFromJsonAsync<JsonElement>(ct);
+            if (!TryReadNbgUsdToGel(json, out var usdToGel) || usdToGel <= 0m) return;
+
+            // 1 GEL = (USD→RSD) / (USD→GEL)
+            var gelToRsd = usdToRsd.Value / usdToGel;
+            await UpsertRateAsync(today, CurrencyCode.Gel, gelToRsd, ct);
+        }
+        catch
+        {
+            // keep last known rates
+        }
+    }
+
+    private async Task UpsertRateAsync(DateOnly today, string currency, decimal rateToRsd, CancellationToken ct)
+    {
+        var existing = await db.ExchangeRates
+            .FirstOrDefaultAsync(r => r.Date == today && r.Currency == currency, ct);
+        if (existing is null)
+        {
+            db.ExchangeRates.Add(new ExchangeRate
+            {
+                Date = today,
+                Currency = currency,
+                RateToRsd = rateToRsd
+            });
+        }
+        else
+        {
+            existing.RateToRsd = rateToRsd;
+            existing.FetchedAt = DateTime.UtcNow;
+        }
     }
 
     private async Task RecalculateOpenPeriodAmountsAsync(CancellationToken ct)
@@ -161,12 +207,45 @@ public class ExchangeRateService(
         return false;
     }
 
+    /// <summary>NBG returns USD priced in GEL (how many lari for <c>quantity</c> USD).</summary>
+    private static bool TryReadNbgUsdToGel(JsonElement json, out decimal usdToGel)
+    {
+        usdToGel = 0m;
+        if (json.ValueKind != JsonValueKind.Array || json.GetArrayLength() == 0)
+            return false;
+
+        var day = json[0];
+        if (!day.TryGetProperty("currencies", out var currencies) || currencies.ValueKind != JsonValueKind.Array)
+            return false;
+
+        foreach (var item in currencies.EnumerateArray())
+        {
+            if (!item.TryGetProperty("code", out var codeEl)) continue;
+            if (!string.Equals(codeEl.GetString(), CurrencyCode.Usd, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            if (!item.TryGetProperty("rate", out var rateEl) || !rateEl.TryGetDecimal(out var rate))
+                return false;
+
+            var quantity = 1m;
+            if (item.TryGetProperty("quantity", out var qtyEl) && qtyEl.TryGetDecimal(out var qty) && qty > 0m)
+                quantity = qty;
+
+            usdToGel = rate / quantity;
+            return usdToGel > 0m;
+        }
+
+        return false;
+    }
+
     private static decimal GetFallbackRate(string currency) =>
         currency.ToUpperInvariant() switch
         {
             // Last-resort only if Kurs API unreachable; approximate NBS middle.
             CurrencyCode.Eur => 117.36m,
             CurrencyCode.Usd => 100.52m,
+            // ~USD/RSD ÷ ~USD/GEL (NBG)
+            CurrencyCode.Gel => 38.5m,
             _ => 1m
         };
 }

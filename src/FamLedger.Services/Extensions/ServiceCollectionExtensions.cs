@@ -56,6 +56,10 @@ public static class ServiceCollectionExtensions
             var settings = sp.GetRequiredService<IAppSettings>();
             client.BaseAddress = new Uri(settings.KursApiBaseUrl.TrimEnd('/') + "/");
         });
+        services.AddHttpClient("NbgApi", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(15);
+        });
         services.AddHttpClient("webhooks");
 
         services
