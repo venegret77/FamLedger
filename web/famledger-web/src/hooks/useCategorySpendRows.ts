@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import type { CategorySpendingLimit, Transaction } from '../api/types'
-import { buildCategorySpendRows, type CategorySpendRow } from './CategorySpendProgress'
+import { buildCategorySpendRows, type CategorySpendRow } from '../components/CategorySpendProgress'
 
 export function useCategorySpendRows(
   transactions: Transaction[] | undefined,
