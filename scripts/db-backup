@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# On-server Postgres backup helper for FamLedger.
+set -euo pipefail
+
+ROOT=/root/backups/postgres/famledger
+COMPOSE=/root/deploy/postgres-backups/compose.yaml
+mkdir -p "$ROOT"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  db-backup list      List dumps
+  db-backup now       Run backup immediately
+  db-backup status    Show backup container
+  db-backup logs      Tail backup logs
+EOF
+}
+
+list() {
+  echo "== FamLedger dumps ($ROOT) =="
+  ls -lah "$ROOT" 2>/dev/null || echo "(empty)"
+}
+
+now() {
+  if docker ps --format '{{.Names}}' | grep -qx famledger-pg-backup; then
+    docker exec famledger-pg-backup /backup.sh
+  else
+    docker compose -f "$COMPOSE" run --rm backup-famledger /backup.sh
+  fi
+  list
+}
+
+status() {
+  docker compose -f "$COMPOSE" ps
+}
+
+logs() {
+  docker logs famledger-pg-backup --tail 80
+}
+
+cmd=${1:-list}
+case "$cmd" in
+  list) list ;;
+  now) now ;;
+  status) status ;;
+  logs) logs ;;
+  -h|--help|help) usage ;;
+  *) usage; exit 1 ;;
+esac

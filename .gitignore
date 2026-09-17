@@ -8,3 +8,9 @@ obj/
 .vs/
 test-cookies.txt
 test-body.json
+scripts/_*.tmp
+scripts/_deploy_ssh_key.tmp
+
+scripts/_*.tmp
+scripts/_deploy_ssh_key.tmp
+
