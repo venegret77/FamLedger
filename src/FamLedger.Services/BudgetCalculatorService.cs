@@ -29,30 +29,30 @@ public class BudgetCalculatorService(
 
         var incomeTotal = await SumIncomesInBaseAsync(context, period, ct);
 
-        // Filter in SQL so oversized PostgreSQL numerics never materialize as System.Decimal.
+        // Round in SQL: unlimited PostgreSQL numeric precision can overflow System.Decimal on SUM.
         var recurringTotal = await db.PeriodRecurringItems
             .Where(x => x.PeriodId == period.Id && !x.IsSkipped)
             .Where(x => x.PlannedBaseAmount > -FxConversion.MaxMoneyAmount && x.PlannedBaseAmount < FxConversion.MaxMoneyAmount)
-            .SumAsync(x => x.PlannedBaseAmount, ct);
+            .SumAsync(x => Math.Round(x.PlannedBaseAmount, 4), ct);
 
         var oneOffTotal = await db.OneOffExpenses
             .Where(x => x.PeriodId == period.Id)
             .Where(x => x.BaseAmount > -FxConversion.MaxMoneyAmount && x.BaseAmount < FxConversion.MaxMoneyAmount)
-            .SumAsync(x => x.BaseAmount, ct);
+            .SumAsync(x => Math.Round(x.BaseAmount, 4), ct);
 
         var plannedExpenses = recurringTotal + oneOffTotal;
         var spent = await db.Transactions
             .Where(t => t.PeriodId == period.Id && t.Kind == TransactionKind.Expense)
             .Where(t => t.BaseAmount > -FxConversion.MaxMoneyAmount && t.BaseAmount < FxConversion.MaxMoneyAmount)
-            .SumAsync(t => t.BaseAmount, ct);
+            .SumAsync(t => Math.Round(t.BaseAmount, 4), ct);
         var topUps = await db.Transactions
             .Where(t => t.PeriodId == period.Id && t.Kind == TransactionKind.Income)
             .Where(t => t.BaseAmount > -FxConversion.MaxMoneyAmount && t.BaseAmount < FxConversion.MaxMoneyAmount)
-            .SumAsync(t => t.BaseAmount, ct);
+            .SumAsync(t => Math.Round(t.BaseAmount, 4), ct);
         var spentToday = await db.Transactions
             .Where(t => t.PeriodId == period.Id && t.Kind == TransactionKind.Expense && t.Date == today)
             .Where(t => t.BaseAmount > -FxConversion.MaxMoneyAmount && t.BaseAmount < FxConversion.MaxMoneyAmount)
-            .SumAsync(t => t.BaseAmount, ct);
+            .SumAsync(t => Math.Round(t.BaseAmount, 4), ct);
         var spentBeforeToday = spent - spentToday;
 
         // Копилка не участвует. Остаток = плановые доходы + пополнения − план − факт.

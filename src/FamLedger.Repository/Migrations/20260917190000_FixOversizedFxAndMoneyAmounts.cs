@@ -24,6 +24,10 @@ namespace FamLedger.Repository.Migrations
                 DELETE FROM rate_overrides
                 WHERE "RateToRsd" <= 0 OR "RateToRsd" > 10000;
 
+                -- High-scale numerics (e.g. GEL cross-rate) overflow System.Decimal on SUM.
+                UPDATE exchange_rates SET "RateToRsd" = ROUND("RateToRsd", 6);
+                UPDATE rate_overrides SET "RateToRsd" = ROUND("RateToRsd", 6);
+
                 UPDATE transactions
                 SET "BaseAmount" = ROUND("Amount" * 38.5, 4)
                 WHERE UPPER("Currency") = 'GEL'
@@ -35,12 +39,23 @@ namespace FamLedger.Repository.Migrations
                   );
 
                 UPDATE transactions
+                SET "BaseAmount" = ROUND("BaseAmount", 4),
+                    "Amount" = ROUND("Amount", 4);
+
+                UPDATE transactions
                 SET "BaseAmount" = "Amount"
                 WHERE "BaseAmount" > 1000000000000 OR "BaseAmount" < -1000000000000;
 
                 UPDATE one_off_expenses
+                SET "BaseAmount" = ROUND("BaseAmount", 4),
+                    "Amount" = ROUND("Amount", 4);
+
+                UPDATE one_off_expenses
                 SET "BaseAmount" = "Amount"
                 WHERE "BaseAmount" > 1000000000000 OR "BaseAmount" < -1000000000000;
+
+                UPDATE period_recurring_items
+                SET "PlannedBaseAmount" = ROUND("PlannedBaseAmount", 4);
 
                 UPDATE period_recurring_items pri
                 SET "PlannedBaseAmount" = re."DefinitionAmount"
