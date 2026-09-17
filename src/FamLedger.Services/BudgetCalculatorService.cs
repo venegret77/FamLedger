@@ -29,23 +29,29 @@ public class BudgetCalculatorService(
 
         var incomeTotal = await SumIncomesInBaseAsync(context, period, ct);
 
+        // Filter in SQL so oversized PostgreSQL numerics never materialize as System.Decimal.
         var recurringTotal = await db.PeriodRecurringItems
             .Where(x => x.PeriodId == period.Id && !x.IsSkipped)
+            .Where(x => x.PlannedBaseAmount > -FxConversion.MaxMoneyAmount && x.PlannedBaseAmount < FxConversion.MaxMoneyAmount)
             .SumAsync(x => x.PlannedBaseAmount, ct);
 
         var oneOffTotal = await db.OneOffExpenses
             .Where(x => x.PeriodId == period.Id)
+            .Where(x => x.BaseAmount > -FxConversion.MaxMoneyAmount && x.BaseAmount < FxConversion.MaxMoneyAmount)
             .SumAsync(x => x.BaseAmount, ct);
 
         var plannedExpenses = recurringTotal + oneOffTotal;
         var spent = await db.Transactions
             .Where(t => t.PeriodId == period.Id && t.Kind == TransactionKind.Expense)
+            .Where(t => t.BaseAmount > -FxConversion.MaxMoneyAmount && t.BaseAmount < FxConversion.MaxMoneyAmount)
             .SumAsync(t => t.BaseAmount, ct);
         var topUps = await db.Transactions
             .Where(t => t.PeriodId == period.Id && t.Kind == TransactionKind.Income)
+            .Where(t => t.BaseAmount > -FxConversion.MaxMoneyAmount && t.BaseAmount < FxConversion.MaxMoneyAmount)
             .SumAsync(t => t.BaseAmount, ct);
         var spentToday = await db.Transactions
             .Where(t => t.PeriodId == period.Id && t.Kind == TransactionKind.Expense && t.Date == today)
+            .Where(t => t.BaseAmount > -FxConversion.MaxMoneyAmount && t.BaseAmount < FxConversion.MaxMoneyAmount)
             .SumAsync(t => t.BaseAmount, ct);
         var spentBeforeToday = spent - spentToday;
 

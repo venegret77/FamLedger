@@ -4,7 +4,6 @@ using FamLedger.Common;
 using FamLedger.Domain.Entities;
 using FamLedger.Domain.ValueObjects;
 using FamLedger.Interfaces.Services;
-using FamLedger.Interfaces.Settings;
 using FamLedger.Repository;
 using Microsoft.EntityFrameworkCore;
 
@@ -26,34 +25,39 @@ public class ExchangeRateService(
         var code = currency.ToUpperInvariant();
 
         var overrideRate = await db.RateOverrides
-            .FirstOrDefaultAsync(r =>
+            .Where(r =>
                 r.ContextId == contextId &&
                 r.Currency == code &&
-                (r.PeriodId == null || r.PeriodId == periodId), ct);
-        if (overrideRate is not null) return overrideRate.RateToRsd;
-
-        var rate = await db.ExchangeRates
-            .Where(r => r.Currency == code && r.Date <= date)
-            .OrderByDescending(r => r.Date)
+                (r.PeriodId == null || r.PeriodId == periodId) &&
+                r.RateToRsd >= FxConversion.MinRateToRsd &&
+                r.RateToRsd <= FxConversion.MaxRateToRsd)
+            .Select(r => (decimal?)r.RateToRsd)
             .FirstOrDefaultAsync(ct);
+        if (overrideRate is not null)
+            return overrideRate.Value;
 
-        if (rate is not null) return rate.RateToRsd;
+        var rate = await FindStoredRateAsync(code, date, ct);
+        if (rate is not null)
+            return rate.Value;
 
         // Нет курса в БД — тянем актуальный с NBS через Kurs API, не fallback.
         await FetchAndStoreRatesAsync(ct);
 
-        rate = await db.ExchangeRates
-            .Where(r => r.Currency == code && r.Date <= date)
-            .OrderByDescending(r => r.Date)
-            .FirstOrDefaultAsync(ct);
-
-        return rate?.RateToRsd ?? GetFallbackRate(code);
+        rate = await FindStoredRateAsync(code, date, ct);
+        return rate ?? GetFallbackRate(code);
     }
 
     public async Task<decimal> ConvertToBaseAsync(decimal amount, string currency, DateOnly date, Guid contextId, Guid? periodId, CancellationToken ct = default)
     {
         var rate = await GetRateAsync(currency, date, contextId, periodId, ct);
-        return amount * rate;
+        if (FxConversion.TryMultiplyToBase(amount, rate, out var baseAmount))
+            return baseAmount;
+
+        var fallback = GetFallbackRate(currency.ToUpperInvariant());
+        if (FxConversion.TryMultiplyToBase(amount, fallback, out baseAmount))
+            return baseAmount;
+
+        return amount;
     }
 
     public async Task FetchAndStoreRatesAsync(CancellationToken ct = default)
@@ -72,10 +76,11 @@ public class ExchangeRateService(
 
                 var json = await response.Content.ReadFromJsonAsync<JsonElement>(ct);
                 if (!TryReadMiddleRate(json, out var middleRate)) continue;
+                if (!FxConversion.IsPlausibleRateToRsd(middleRate)) continue;
 
                 await UpsertRateAsync(today, currency, middleRate, ct);
 
-                if (currency == CurrencyCode.Usd)
+                if (currency == CurrencyCode.Usd && FxConversion.IsPlausibleUsdToRsd(middleRate))
                     usdToRsd = middleRate;
 
                 await redis.SetAsync(CacheKeys.FxRates(today), middleRate.ToString(System.Globalization.CultureInfo.InvariantCulture), TimeSpan.FromHours(6));
@@ -89,10 +94,16 @@ public class ExchangeRateService(
         if (usdToRsd is null)
         {
             usdToRsd = await db.ExchangeRates
-                .Where(r => r.Currency == CurrencyCode.Usd)
+                .Where(r =>
+                    r.Currency == CurrencyCode.Usd &&
+                    r.RateToRsd >= FxConversion.MinRateToRsd &&
+                    r.RateToRsd <= FxConversion.MaxRateToRsd)
                 .OrderByDescending(r => r.Date)
                 .Select(r => (decimal?)r.RateToRsd)
                 .FirstOrDefaultAsync(ct);
+
+            if (usdToRsd is not null && !FxConversion.IsPlausibleUsdToRsd(usdToRsd.Value))
+                usdToRsd = null;
         }
 
         await FetchAndStoreGelRateAsync(today, usdToRsd, ct);
@@ -103,7 +114,8 @@ public class ExchangeRateService(
 
     private async Task FetchAndStoreGelRateAsync(DateOnly today, decimal? usdToRsd, CancellationToken ct)
     {
-        if (usdToRsd is null or <= 0m) return;
+        if (usdToRsd is null || !FxConversion.IsPlausibleUsdToRsd(usdToRsd.Value))
+            return;
 
         try
         {
@@ -112,10 +124,14 @@ public class ExchangeRateService(
             if (!response.IsSuccessStatusCode) return;
 
             var json = await response.Content.ReadFromJsonAsync<JsonElement>(ct);
-            if (!TryReadNbgUsdToGel(json, out var usdToGel) || usdToGel <= 0m) return;
+            if (!TryReadNbgUsdToGel(json, out var usdToGel) || !FxConversion.IsPlausibleUsdToGel(usdToGel))
+                return;
 
             // 1 GEL = (USD→RSD) / (USD→GEL)
-            var gelToRsd = usdToRsd.Value / usdToGel;
+            var gelToRsd = decimal.Round(usdToRsd.Value / usdToGel, 6, MidpointRounding.AwayFromZero);
+            if (!FxConversion.IsPlausibleRateToRsd(gelToRsd))
+                return;
+
             await UpsertRateAsync(today, CurrencyCode.Gel, gelToRsd, ct);
         }
         catch
@@ -126,9 +142,16 @@ public class ExchangeRateService(
 
     private async Task UpsertRateAsync(DateOnly today, string currency, decimal rateToRsd, CancellationToken ct)
     {
-        var existing = await db.ExchangeRates
-            .FirstOrDefaultAsync(r => r.Date == today && r.Currency == currency, ct);
-        if (existing is null)
+        if (!FxConversion.IsPlausibleRateToRsd(rateToRsd))
+            return;
+
+        // Select Id only — never materialize an oversized RateToRsd into System.Decimal.
+        var existingId = await db.ExchangeRates
+            .Where(r => r.Date == today && r.Currency == currency)
+            .Select(r => (Guid?)r.Id)
+            .FirstOrDefaultAsync(ct);
+
+        if (existingId is null)
         {
             db.ExchangeRates.Add(new ExchangeRate
             {
@@ -136,12 +159,14 @@ public class ExchangeRateService(
                 Currency = currency,
                 RateToRsd = rateToRsd
             });
+            return;
         }
-        else
-        {
-            existing.RateToRsd = rateToRsd;
-            existing.FetchedAt = DateTime.UtcNow;
-        }
+
+        await db.ExchangeRates
+            .Where(r => r.Id == existingId.Value)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(r => r.RateToRsd, rateToRsd)
+                .SetProperty(r => r.FetchedAt, DateTime.UtcNow), ct);
     }
 
     private async Task RecalculateOpenPeriodAmountsAsync(CancellationToken ct)
@@ -161,14 +186,10 @@ public class ExchangeRateService(
                 continue;
             }
 
-            var rate = await db.ExchangeRates
-                .Where(r => r.Currency == expense.DefinitionCurrency.ToUpperInvariant())
-                .OrderByDescending(r => r.Date)
-                .Select(r => (decimal?)r.RateToRsd)
-                .FirstOrDefaultAsync(ct);
-
+            var rate = await FindLatestRateAsync(expense.DefinitionCurrency, ct);
             if (rate is null) continue;
-            item.PlannedBaseAmount = expense.DefinitionAmount * rate.Value;
+            if (FxConversion.TryMultiplyToBase(expense.DefinitionAmount, rate.Value, out var baseAmount))
+                item.PlannedBaseAmount = baseAmount;
         }
 
         var openOneOff = await db.OneOffExpenses
@@ -184,18 +205,35 @@ public class ExchangeRateService(
                 continue;
             }
 
-            var rate = await db.ExchangeRates
-                .Where(r => r.Currency == expense.Currency.ToUpperInvariant())
-                .OrderByDescending(r => r.Date)
-                .Select(r => (decimal?)r.RateToRsd)
-                .FirstOrDefaultAsync(ct);
-
+            var rate = await FindLatestRateAsync(expense.Currency, ct);
             if (rate is null) continue;
-            expense.BaseAmount = expense.Amount * rate.Value;
+            if (FxConversion.TryMultiplyToBase(expense.Amount, rate.Value, out var baseAmount))
+                expense.BaseAmount = baseAmount;
         }
 
         await db.SaveChangesAsync(ct);
     }
+
+    private Task<decimal?> FindStoredRateAsync(string code, DateOnly date, CancellationToken ct) =>
+        db.ExchangeRates
+            .Where(r =>
+                r.Currency == code &&
+                r.Date <= date &&
+                r.RateToRsd >= FxConversion.MinRateToRsd &&
+                r.RateToRsd <= FxConversion.MaxRateToRsd)
+            .OrderByDescending(r => r.Date)
+            .Select(r => (decimal?)r.RateToRsd)
+            .FirstOrDefaultAsync(ct);
+
+    private Task<decimal?> FindLatestRateAsync(string currency, CancellationToken ct) =>
+        db.ExchangeRates
+            .Where(r =>
+                r.Currency == currency.ToUpperInvariant() &&
+                r.RateToRsd >= FxConversion.MinRateToRsd &&
+                r.RateToRsd <= FxConversion.MaxRateToRsd)
+            .OrderByDescending(r => r.Date)
+            .Select(r => (decimal?)r.RateToRsd)
+            .FirstOrDefaultAsync(ct);
 
     private static bool TryReadMiddleRate(JsonElement json, out decimal rate)
     {
