@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import {
   useCreateReminder,
   useDeleteReminder,
@@ -87,6 +87,7 @@ export function RemindersPage() {
   const [isEnabled, setIsEnabled] = useState(true)
   const [scheduleTarget, setScheduleTarget] = useState<Reminder | null>(null)
   const [draftScheduleOpen, setDraftScheduleOpen] = useState(false)
+  const formRef = useRef<HTMLDivElement>(null)
 
   const isPersonal = settings?.isPersonal ?? true
   const audienceOptions = [
@@ -103,12 +104,21 @@ export function RemindersPage() {
   }, [reminders])
 
   function openCreate() {
+    const alreadyCreating = showForm && editing === null
     setEditing(null)
     setMessage('')
     setScheduleDraft(emptyScheduleDraft())
     setAudience('Self')
     setIsEnabled(true)
     setShowForm(true)
+    if (alreadyCreating) scrollFormIntoView()
+  }
+
+  function scrollFormIntoView() {
+    const form = formRef.current
+    if (!form) return
+    form.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    form.querySelector<HTMLInputElement>('input:not([type="checkbox"])')?.focus({ preventScroll: true })
   }
 
   function openEditCustom(reminder: Reminder) {
@@ -126,6 +136,11 @@ export function RemindersPage() {
     setShowForm(false)
     setEditing(null)
   }
+
+  useEffect(() => {
+    if (!showForm) return
+    scrollFormIntoView()
+  }, [showForm, editing?.id])
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault()
@@ -232,11 +247,7 @@ export function RemindersPage() {
       <PageHeader
         title="Напоминания"
         subtitle="Стандартные уведомления и свои тексты в Telegram. Лимиты по категориям — в Настройках → Категории и лимиты."
-        action={
-          !showForm ? (
-            <Button onClick={openCreate}>Своё напоминание</Button>
-          ) : undefined
-        }
+        action={<Button onClick={openCreate}>Своё напоминание</Button>}
       />
 
       <Card>
@@ -314,7 +325,8 @@ export function RemindersPage() {
       </Card>
 
       {showForm && (
-        <Card>
+        <div ref={formRef} className="scroll-mt-20">
+          <Card>
           <form className="space-y-4" onSubmit={(e) => void handleSubmit(e)}>
             <Input
               label="Текст"
@@ -365,7 +377,8 @@ export function RemindersPage() {
               </Button>
             </div>
           </form>
-        </Card>
+          </Card>
+        </div>
       )}
 
       <div className="space-y-3">
