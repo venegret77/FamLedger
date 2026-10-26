@@ -23,7 +23,7 @@ export function AuthGuard() {
 
   if (isChecking) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-slate-50">
+      <div className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-slate-50">
         <Spinner />
         <p className="text-sm text-slate-500">Проверяем вход…</p>
       </div>
@@ -49,7 +49,7 @@ export function GuestGuard() {
 
   if (isChecking || isAuthenticated) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50">
+      <div className="flex min-h-dvh items-center justify-center bg-slate-50">
         <Spinner />
       </div>
     )

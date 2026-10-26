@@ -6,9 +6,9 @@ export function AppLayout() {
   const { data: user } = useMe()
 
   return (
-    <div className="flex min-h-full bg-slate-50">
+    <div className="flex min-h-full min-w-0 bg-slate-50">
       <Sidebar />
-      <div className="flex min-h-full flex-1 flex-col">
+      <div className="flex min-h-full min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-30 border-b border-slate-200/80 bg-white/90 backdrop-blur safe-top lg:hidden">
           <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4">
             <div className="flex items-center gap-2">
@@ -25,7 +25,7 @@ export function AppLayout() {
           </div>
         </header>
 
-        <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-5 pb-24 lg:px-8 lg:py-8 lg:pb-8">
+        <main className="mx-auto w-full min-w-0 max-w-6xl flex-1 px-4 py-5 pb-24 lg:px-8 lg:py-8 lg:pb-8">
           <Outlet />
         </main>
 

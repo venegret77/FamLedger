@@ -267,11 +267,23 @@ export type ReminderKind =
   | 'UnpaidDebts'
   | 'UnpaidPlanned'
 
+export interface ReminderDaySlot {
+  day: number
+  enabled: boolean
+  timeUtc: string
+}
+
+export interface ReminderSchedule {
+  sameTimeEveryDay: boolean
+  days: ReminderDaySlot[]
+}
+
 export interface Reminder {
   id: string
   kind: ReminderKind
   message?: string | null
   timeUtc?: string | null
+  schedule?: ReminderSchedule | null
   thresholdPercents?: number[]
   audience: ReminderAudience
   isEnabled: boolean

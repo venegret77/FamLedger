@@ -1,5 +1,7 @@
 using FamLedger.Api.Extensions;
+using FamLedger.Common;
 using FamLedger.Domain.Enums;
+using FamLedger.Domain.Models;
 using FamLedger.Interfaces.Services;
 using FamLedger.Repository;
 using Microsoft.AspNetCore.Authorization;
@@ -16,13 +18,18 @@ public class RemindersController(
     IUserService userService,
     IReminderService reminderService) : ControllerBase
 {
+    public record ReminderDayRequest(int Day, bool Enabled, string? TimeUtc);
+
+    public record ReminderScheduleRequest(bool SameTimeEveryDay, ReminderDayRequest[]? Days);
+
     public record ReminderRequest(
         string? Message,
         string? TimeUtc,
         string Audience,
         bool? IsEnabled,
         string? Kind,
-        int[]? ThresholdPercents);
+        int[]? ThresholdPercents,
+        ReminderScheduleRequest? Schedule);
 
     [HttpGet]
     public async Task<IActionResult> List(CancellationToken ct)
@@ -42,13 +49,10 @@ public class RemindersController(
             if (!TryParseAudience(request.Audience, out var audience))
                 return BadRequest(new { message = "Invalid audience" });
 
-            TimeOnly? timeUtc = null;
-            if (!string.IsNullOrWhiteSpace(request.TimeUtc))
-            {
-                if (!TryParseTime(request.TimeUtc, out var parsed))
-                    return BadRequest(new { message = "Invalid timeUtc, expected HH:mm" });
-                timeUtc = parsed;
-            }
+            if (!TryParseTimeField(request.TimeUtc, out var timeUtc, out var timeError))
+                return BadRequest(new { message = timeError });
+            if (!TryParseSchedule(request.Schedule, out var schedule, out var scheduleError))
+                return BadRequest(new { message = scheduleError });
 
             var reminder = await reminderService.CreateAsync(
                 context.Id,
@@ -59,6 +63,7 @@ public class RemindersController(
                 ReminderKind.Custom,
                 request.ThresholdPercents,
                 context.IsPersonal,
+                schedule,
                 ct);
 
             var created = await db.Reminders
@@ -86,13 +91,10 @@ public class RemindersController(
             if (!TryParseAudience(request.Audience, out var audience))
                 return BadRequest(new { message = "Invalid audience" });
 
-            TimeOnly? timeUtc = null;
-            if (!string.IsNullOrWhiteSpace(request.TimeUtc))
-            {
-                if (!TryParseTime(request.TimeUtc, out var parsed))
-                    return BadRequest(new { message = "Invalid timeUtc, expected HH:mm" });
-                timeUtc = parsed;
-            }
+            if (!TryParseTimeField(request.TimeUtc, out var timeUtc, out var timeError))
+                return BadRequest(new { message = timeError });
+            if (!TryParseSchedule(request.Schedule, out var schedule, out var scheduleError))
+                return BadRequest(new { message = scheduleError });
 
             await reminderService.UpdateAsync(
                 id,
@@ -103,6 +105,7 @@ public class RemindersController(
                 request.IsEnabled ?? true,
                 request.ThresholdPercents,
                 context.IsPersonal,
+                schedule,
                 ct);
 
             var updated = await db.Reminders
@@ -156,6 +159,7 @@ public class RemindersController(
         Kind = r.Kind.ToString(),
         r.Message,
         TimeUtc = r.TimeUtc?.ToString("HH:mm"),
+        Schedule = ToScheduleDto(r),
         ThresholdPercents = r.ThresholdPercents ?? [],
         Audience = r.Audience.ToString(),
         r.IsEnabled,
@@ -167,10 +171,77 @@ public class RemindersController(
         UpdatedAtUtc = r.UpdatedAtUtc,
     };
 
-    private static bool TryParseTime(string? value, out TimeOnly time)
+    private static object? ToScheduleDto(Domain.Entities.Reminder reminder)
     {
-        time = default;
-        return !string.IsNullOrWhiteSpace(value) && TimeOnly.TryParse(value, out time);
+        var schedule = ReminderScheduleRules.Resolve(reminder.ScheduleJson, reminder.TimeUtc);
+        if (schedule is null)
+            return null;
+
+        return new
+        {
+            schedule.SameTimeEveryDay,
+            Days = schedule.Days
+                .Where(day => day.Enabled)
+                .Select(day => new
+                {
+                    day.Day,
+                    day.Enabled,
+                    TimeUtc = day.TimeUtc.ToString("HH:mm"),
+                }),
+        };
+    }
+
+    private static bool TryParseTimeField(string? value, out TimeOnly? time, out string? error)
+    {
+        time = null;
+        error = null;
+        if (string.IsNullOrWhiteSpace(value))
+            return true;
+        if (!TimeOnly.TryParse(value, out var parsed))
+        {
+            error = "Invalid timeUtc, expected HH:mm";
+            return false;
+        }
+
+        time = new TimeOnly(parsed.Hour, parsed.Minute);
+        return true;
+    }
+
+    private static bool TryParseSchedule(
+        ReminderScheduleRequest? request,
+        out ReminderSchedule? schedule,
+        out string? error)
+    {
+        schedule = null;
+        error = null;
+        if (request is null)
+            return true;
+
+        var days = new List<ReminderDaySlot>();
+        foreach (var day in request.Days ?? [])
+        {
+            if (!day.Enabled)
+                continue;
+            if (string.IsNullOrWhiteSpace(day.TimeUtc) || !TimeOnly.TryParse(day.TimeUtc, out var parsed))
+            {
+                error = "Invalid timeUtc, expected HH:mm";
+                return false;
+            }
+
+            days.Add(new ReminderDaySlot
+            {
+                Day = day.Day,
+                Enabled = true,
+                TimeUtc = new TimeOnly(parsed.Hour, parsed.Minute),
+            });
+        }
+
+        schedule = new ReminderSchedule
+        {
+            SameTimeEveryDay = request.SameTimeEveryDay,
+            Days = days,
+        };
+        return true;
     }
 
     private static bool TryParseAudience(string? value, out ReminderAudience audience)

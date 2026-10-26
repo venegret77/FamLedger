@@ -738,12 +738,18 @@ namespace FamLedger.Repository.Migrations
                     b.Property<int>("Kind")
                         .HasColumnType("integer");
 
+                    b.Property<DateTime?>("LastFiredAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateOnly?>("LastFiredDateUtc")
                         .HasColumnType("date");
 
                     b.Property<string>("Message")
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("ScheduleJson")
+                        .HasColumnType("jsonb");
 
                     b.PrimitiveCollection<int[]>("ThresholdPercents")
                         .IsRequired()

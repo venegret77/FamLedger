@@ -1,6 +1,7 @@
 using FamLedger.Common;
 using FamLedger.Domain.Entities;
 using FamLedger.Domain.Enums;
+using FamLedger.Domain.Models;
 using FamLedger.Interfaces.Services;
 using FamLedger.Repository;
 using Microsoft.EntityFrameworkCore;
@@ -86,6 +87,7 @@ public class ReminderService(AppDbContext db) : IReminderService
         ReminderKind kind,
         IReadOnlyList<int>? thresholdPercents,
         bool isPersonalContext,
+        ReminderSchedule? schedule = null,
         CancellationToken ct = default)
     {
         if (kind != ReminderKind.Custom)
@@ -93,8 +95,7 @@ public class ReminderService(AppDbContext db) : IReminderService
 
         ValidateAudience(audience, isPersonalContext);
         var trimmed = ValidateMessage(message, required: true);
-        if (timeUtc is null)
-            throw new InvalidOperationException("Time is required");
+        var normalized = RequireSchedule(schedule, timeUtc);
 
         var reminder = new Reminder
         {
@@ -102,7 +103,8 @@ public class ReminderService(AppDbContext db) : IReminderService
             CreatedByUserId = userId,
             Kind = ReminderKind.Custom,
             Message = trimmed,
-            TimeUtc = timeUtc,
+            TimeUtc = ReminderScheduleRules.RepresentativeTime(normalized),
+            ScheduleJson = ReminderScheduleRules.Serialize(normalized),
             Audience = audience,
             IsEnabled = true,
             CreatedAtUtc = DateTime.UtcNow,
@@ -123,6 +125,7 @@ public class ReminderService(AppDbContext db) : IReminderService
         bool isEnabled,
         IReadOnlyList<int>? thresholdPercents,
         bool isPersonalContext,
+        ReminderSchedule? schedule = null,
         CancellationToken ct = default)
     {
         ValidateAudience(audience, isPersonalContext);
@@ -133,20 +136,13 @@ public class ReminderService(AppDbContext db) : IReminderService
             throw new UnauthorizedAccessException("Only the creator can edit this reminder");
 
         if (reminder.Kind == ReminderKind.Custom)
-        {
             reminder.Message = ValidateMessage(message, required: true);
-            if (timeUtc is null)
-                throw new InvalidOperationException("Time is required");
-            reminder.TimeUtc = timeUtc;
-        }
-        else
+
+        if (NeedsTime(reminder.Kind))
+            ApplySchedule(reminder, schedule, timeUtc);
+
+        if (reminder.Kind != ReminderKind.Custom)
         {
-            if (NeedsTime(reminder.Kind))
-            {
-                if (timeUtc is null)
-                    throw new InvalidOperationException("Time is required");
-                reminder.TimeUtc = timeUtc;
-            }
 
             if (reminder.Kind == ReminderKind.BudgetAlert)
                 reminder.ThresholdPercents = ThresholdPercentHelper.Normalize(
@@ -181,15 +177,12 @@ public class ReminderService(AppDbContext db) : IReminderService
         DateOnly todayUtc,
         CancellationToken ct = default)
     {
-        return await db.Reminders
+        var utcNow = todayUtc.ToDateTime(new TimeOnly(timeUtc.Hour, timeUtc.Minute), DateTimeKind.Utc);
+        var candidates = await db.Reminders
             .Include(r => r.CreatedByUser)
             .Include(r => r.Context)
             .Where(r =>
                 r.IsEnabled &&
-                r.TimeUtc != null &&
-                r.TimeUtc.Value.Hour == timeUtc.Hour &&
-                r.TimeUtc.Value.Minute == timeUtc.Minute &&
-                (r.LastFiredDateUtc == null || r.LastFiredDateUtc != todayUtc) &&
                 (r.Kind == ReminderKind.Custom
                  || r.Kind == ReminderKind.DailyBalance
                  || r.Kind == ReminderKind.EveningCheckIn
@@ -197,6 +190,15 @@ public class ReminderService(AppDbContext db) : IReminderService
                  || r.Kind == ReminderKind.UnpaidDebts
                  || r.Kind == ReminderKind.UnpaidPlanned))
             .ToListAsync(ct);
+
+        return candidates
+            .Where(r => ReminderScheduleRules.IsDue(
+                r.ScheduleJson,
+                r.TimeUtc,
+                r.LastFiredAtUtc,
+                r.LastFiredDateUtc,
+                utcNow))
+            .ToList();
     }
 
     public async Task<IReadOnlyList<Reminder>> GetEnabledBudgetAlertsAsync(
@@ -218,6 +220,7 @@ public class ReminderService(AppDbContext db) : IReminderService
         var reminder = await db.Reminders.FirstOrDefaultAsync(r => r.Id == id, ct);
         if (reminder is null) return;
         reminder.LastFiredDateUtc = todayUtc;
+        reminder.LastFiredAtUtc = DateTime.UtcNow;
         reminder.UpdatedAtUtc = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
     }
@@ -284,6 +287,51 @@ public class ReminderService(AppDbContext db) : IReminderService
         kind is ReminderKind.Custom or ReminderKind.DailyBalance
             or ReminderKind.EveningCheckIn or ReminderKind.UnpaidDebts
             or ReminderKind.UnpaidPlanned or ReminderKind.PeriodEnding;
+
+    private static ReminderSchedule RequireSchedule(ReminderSchedule? schedule, TimeOnly? timeUtc)
+    {
+        if (schedule is not null)
+            return ReminderScheduleRules.Normalize(schedule);
+        if (timeUtc is null)
+            throw new InvalidOperationException("Time is required");
+        return ReminderScheduleRules.EveryDay(timeUtc.Value);
+    }
+
+    private static void ApplySchedule(Reminder reminder, ReminderSchedule? schedule, TimeOnly? timeUtc)
+    {
+        if (schedule is not null)
+        {
+            var normalized = ReminderScheduleRules.Normalize(schedule);
+            reminder.ScheduleJson = ReminderScheduleRules.Serialize(normalized);
+            reminder.TimeUtc = ReminderScheduleRules.RepresentativeTime(normalized);
+            return;
+        }
+
+        if (timeUtc is null)
+        {
+            if (string.IsNullOrWhiteSpace(reminder.ScheduleJson) && reminder.TimeUtc is null)
+                throw new InvalidOperationException("Time is required");
+            return;
+        }
+
+        var existing = ReminderScheduleRules.Parse(reminder.ScheduleJson);
+        if (existing is { SameTimeEveryDay: false })
+            return;
+
+        if (existing is { SameTimeEveryDay: true })
+        {
+            foreach (var day in existing.Days)
+                day.TimeUtc = timeUtc.Value;
+            var normalized = ReminderScheduleRules.Normalize(existing);
+            reminder.ScheduleJson = ReminderScheduleRules.Serialize(normalized);
+            reminder.TimeUtc = timeUtc;
+            return;
+        }
+
+        var everyDay = ReminderScheduleRules.EveryDay(timeUtc.Value);
+        reminder.ScheduleJson = ReminderScheduleRules.Serialize(everyDay);
+        reminder.TimeUtc = timeUtc;
+    }
 
     private static void ValidateAudience(ReminderAudience audience, bool isPersonalContext)
     {

@@ -10,10 +10,17 @@ public class Reminder
     public ReminderKind Kind { get; set; } = ReminderKind.Custom;
     public string? Message { get; set; }
     public TimeOnly? TimeUtc { get; set; }
+
+    /// <summary>
+    /// JSON schedule. Null means every day at <see cref="TimeUtc"/>.
+    /// </summary>
+    public string? ScheduleJson { get; set; }
+
     public int[] ThresholdPercents { get; set; } = [];
     public ReminderAudience Audience { get; set; } = ReminderAudience.Self;
     public bool IsEnabled { get; set; } = true;
     public DateOnly? LastFiredDateUtc { get; set; }
+    public DateTime? LastFiredAtUtc { get; set; }
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
 

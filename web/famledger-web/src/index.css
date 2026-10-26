@@ -17,14 +17,37 @@
 @layer base {
   html {
     @apply h-full;
+    overflow-x: clip;
   }
 
   body {
     @apply min-h-full bg-slate-50 text-slate-900;
+    min-height: 100dvh;
+    overflow-x: clip;
   }
 
   #root {
     @apply min-h-full;
+    min-height: 100dvh;
+  }
+}
+
+input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']),
+select,
+textarea {
+  max-width: 100%;
+  min-width: 0;
+}
+
+@media (pointer: coarse), (max-width: 1023px) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+
+  .grid > * {
+    min-width: 0;
   }
 }
 

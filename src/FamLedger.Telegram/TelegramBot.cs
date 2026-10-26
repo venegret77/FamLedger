@@ -34,7 +34,7 @@ public class TelegramBot(
             var chatId = update.Message?.Chat.Id ?? update.CallbackQuery?.Message?.Chat.Id;
             if (chatId is not null)
             {
-                await client.SendMessage(chatId.Value, "Что-то пошло не так. Попробуй ещё раз или /start login", cancellationToken: ct);
+                await client.SendSilent(chatId.Value, "Что-то пошло не так. Попробуй ещё раз или /start login", cancellationToken: ct);
             }
         }
     }
@@ -75,7 +75,7 @@ public class TelegramBot(
                     var token = await loginTokenService.CreateAsync(telegramUserId, ct);
                     var keyboard = new InlineKeyboardMarkup(
                         InlineKeyboardButton.WithCopyText("Скопировать код", token));
-                    await client.SendMessage(chatId,
+                    await client.SendSilent(chatId,
                         $"Код для входа (10 мин):\n{token}",
                         replyMarkup: keyboard,
                         cancellationToken: ct);
@@ -104,13 +104,13 @@ public class TelegramBot(
                 var topUpContext = await ResolveSpendContextAsync(contextService, user.Id, user.ActiveContextId, ct);
                 if (topUpContext is null)
                 {
-                    await client.SendMessage(chatId, "Сначала войди на сайт и выбери бюджет.", cancellationToken: ct);
+                    await client.SendSilent(chatId, "Сначала войди на сайт и выбери бюджет.", cancellationToken: ct);
                     return;
                 }
 
                 if (!MoneyInputParser.TryParse(payload, out var topUpParsed, topUpContext.BaseCurrency))
                 {
-                    await client.SendMessage(chatId,
+                    await client.SendSilent(chatId,
                         "Пример: пополнить 1000 премия или пополнить 50 eur кэшбек",
                         cancellationToken: ct);
                     return;
@@ -127,13 +127,13 @@ public class TelegramBot(
                 var debtContext = await ResolveSpendContextAsync(contextService, user.Id, user.ActiveContextId, ct);
                 if (debtContext is null)
                 {
-                    await client.SendMessage(chatId, "Сначала войди на сайт и выбери бюджет.", cancellationToken: ct);
+                    await client.SendSilent(chatId, "Сначала войди на сайт и выбери бюджет.", cancellationToken: ct);
                     return;
                 }
 
                 if (!MoneyInputParser.TryParse(payload, out var debtParsed, debtContext.BaseCurrency))
                 {
-                    await client.SendMessage(chatId,
+                    await client.SendSilent(chatId,
                         "Пример: долг 1000 обед или долг 20 eur такси",
                         cancellationToken: ct);
                     return;
@@ -152,7 +152,7 @@ public class TelegramBot(
                 var name = msg.Text.Trim();
                 if (name.Length == 0)
                 {
-                    await client.SendMessage(chatId, "Введи имя человека или название.", cancellationToken: ct);
+                    await client.SendSilent(chatId, "Введи имя человека или название.", cancellationToken: ct);
                     return;
                 }
 
@@ -168,7 +168,7 @@ public class TelegramBot(
                         InlineKeyboardButton.WithCallbackData("Я должен", "debt_dir:we"),
                     }
                 };
-                await client.SendMessage(chatId,
+                await client.SendSilent(chatId,
                     $"«{name}» — кто кому должен?",
                     replyMarkup: new InlineKeyboardMarkup(rows),
                     cancellationToken: ct);
@@ -177,7 +177,7 @@ public class TelegramBot(
 
             if (msg.Text.TrimStart().StartsWith('/'))
             {
-                await client.SendMessage(chatId,
+                await client.SendSilent(chatId,
                     "Неизвестная команда. /start — справка.",
                     cancellationToken: ct);
                 return;
@@ -186,7 +186,7 @@ public class TelegramBot(
             var spendCtx = await ResolveSpendContextAsync(contextService, user.Id, user.ActiveContextId, ct);
             if (spendCtx is null)
             {
-                await client.SendMessage(chatId, "Сначала войди на сайт и выбери бюджет.", cancellationToken: ct);
+                await client.SendSilent(chatId, "Сначала войди на сайт и выбери бюджет.", cancellationToken: ct);
                 return;
             }
 
@@ -198,7 +198,7 @@ public class TelegramBot(
                 return;
             }
 
-            await client.SendMessage(chatId,
+            await client.SendSilent(chatId,
                 "Не понял. Напиши сумму, пополнить / долг / статистика — или справка",
                 replyMarkup: MainMenuKeyboard(),
                 cancellationToken: ct);
@@ -249,7 +249,7 @@ public class TelegramBot(
         var baseCur = spendContext?.BaseCurrency ?? "RSD";
         var name = user.DisplayName ?? user.FirstName ?? "друг";
 
-        await client.SendMessage(chatId,
+        await client.SendSilent(chatId,
             $"Привет, {name}!\n\n" +
             "Списание — просто отправь сумму:\n" +
             "• 1000 кофе\n" +
@@ -289,7 +289,7 @@ public class TelegramBot(
         var spendContext = await ResolveSpendContextAsync(contextService, user.Id, user.ActiveContextId, ct);
         if (spendContext is null)
         {
-            await client.SendMessage(chatId, "Сначала войди на сайт и выбери бюджет.", cancellationToken: ct);
+            await client.SendSilent(chatId, "Сначала войди на сайт и выбери бюджет.", cancellationToken: ct);
             return;
         }
 
@@ -297,7 +297,7 @@ public class TelegramBot(
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         var summary = await calculator.CalculateAsync(spendContext, period, today, ct);
         var limits = await categoryLimitService.GetProgressAsync(spendContext.Id, user.Id, ct);
-        await client.SendMessage(chatId,
+        await client.SendSilent(chatId,
             BudgetSummaryFormatter.FormatStats(
                 summary, spendContext.BaseCurrency, spendContext.Name, limits),
             cancellationToken: ct);
@@ -342,7 +342,7 @@ public class TelegramBot(
         rows.Add([InlineKeyboardButton.WithCallbackData("Без категории", "cat:none")]);
 
         var label = intent == "income" ? "Пополнение" : "Списание";
-        await client.SendMessage(chatId,
+        await client.SendSilent(chatId,
             $"{label} {MoneyFormatter.Format(parsed.Amount, currency)} в «{spendContext.Name}» — выбери категорию:",
             replyMarkup: new InlineKeyboardMarkup(rows),
             cancellationToken: ct);
@@ -385,7 +385,7 @@ public class TelegramBot(
             .ToList();
         rows.Add([InlineKeyboardButton.WithCallbackData("➕ Новый должник", "debt_pick:new")]);
 
-        await client.SendMessage(chatId,
+        await client.SendSilent(chatId,
             $"Долг {MoneyFormatter.Format(parsed.Amount, currency)} — выбери кого:",
             replyMarkup: new InlineKeyboardMarkup(rows),
             cancellationToken: ct);
@@ -426,8 +426,9 @@ public class TelegramBot(
             ct);
         await dialogState.ClearAsync(chatId, ct);
         await client.AnswerCallbackQuery(cb.Id, "Записано!", cancellationToken: ct);
+        await DeletePromptAsync(client, cb, ct);
         var label = kind == TransactionKind.Income ? "Пополнение" : "Расход";
-        await client.SendMessage(chatId,
+        await client.SendSilent(chatId,
             $"✅ {label} {MoneyFormatter.Format(state.PendingAmount.Value, currency)} записано",
             cancellationToken: ct);
 
@@ -462,7 +463,7 @@ public class TelegramBot(
             state.Step = "debt_name";
             await dialogState.SetAsync(chatId, state, TimeSpan.FromHours(1), ct);
             await client.AnswerCallbackQuery(cb.Id, cancellationToken: ct);
-            await client.SendMessage(chatId, "Как зовут? Напиши имя:", cancellationToken: ct);
+            await client.SendSilent(chatId, "Как зовут? Напиши имя:", cancellationToken: ct);
             return;
         }
 
@@ -476,7 +477,7 @@ public class TelegramBot(
             ct);
         await dialogState.ClearAsync(chatId, ct);
         await client.AnswerCallbackQuery(cb.Id, "Записано!", cancellationToken: ct);
-        await client.SendMessage(chatId,
+        await client.SendSilent(chatId,
             $"✅ Долг {MoneyFormatter.Format(state.PendingAmount.Value, currency)} записан",
             cancellationToken: ct);
     }
@@ -516,7 +517,7 @@ public class TelegramBot(
             ct);
         await dialogState.ClearAsync(chatId, ct);
         await client.AnswerCallbackQuery(cb.Id, "Записано!", cancellationToken: ct);
-        await client.SendMessage(chatId,
+        await client.SendSilent(chatId,
             $"✅ Долг {MoneyFormatter.Format(state.PendingAmount.Value, currency)} на «{state.PendingDebtName}» записан",
             cancellationToken: ct);
     }
@@ -542,6 +543,21 @@ public class TelegramBot(
         return contexts[0];
     }
 
+    private static async Task DeletePromptAsync(ITelegramBotClient client, CallbackQuery cb, CancellationToken ct)
+    {
+        if (cb.Message is null)
+            return;
+
+        try
+        {
+            await client.DeleteMessage(cb.Message.Chat.Id, cb.Message.MessageId, ct);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to delete category prompt: {ex.Message}");
+        }
+    }
+
     private static Task HandleErrorAsync(ITelegramBotClient client, Exception ex, CancellationToken ct)
     {
         Console.WriteLine($"Telegram error: {ex.Message}");
@@ -563,4 +579,20 @@ public class TelegramBot(
         var payload = parts.Length > 1 ? parts[1].Trim() : string.Empty;
         return (command.ToLowerInvariant(), payload);
     }
+}
+
+internal static class SilentTelegram
+{
+    public static Task<Message> SendSilent(
+        this ITelegramBotClient client,
+        ChatId chatId,
+        string text,
+        ReplyMarkup? replyMarkup = null,
+        CancellationToken cancellationToken = default) =>
+        client.SendMessage(
+            chatId,
+            text,
+            replyMarkup: replyMarkup,
+            disableNotification: true,
+            cancellationToken: cancellationToken);
 }

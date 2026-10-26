@@ -242,6 +242,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasIndex(x => new { x.IsEnabled, x.TimeUtc });
             e.HasIndex(x => new { x.ContextId, x.Kind, x.CreatedByUserId });
             e.Property(x => x.Message).HasMaxLength(1000);
+            e.Property(x => x.ScheduleJson).HasColumnType("jsonb");
             e.Property(x => x.ThresholdPercents);
             e.HasOne(x => x.Context).WithMany(x => x.Reminders).HasForeignKey(x => x.ContextId);
             e.HasOne(x => x.CreatedByUser).WithMany().HasForeignKey(x => x.CreatedByUserId);

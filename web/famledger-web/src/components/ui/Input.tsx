@@ -17,7 +17,7 @@ export function Input({
   const inputId = id ?? label?.toLowerCase().replace(/\s+/g, '-')
 
   return (
-    <div className="space-y-1.5">
+    <div className="min-w-0 max-w-full space-y-1.5">
       {label && (
         <label
           htmlFor={inputId}
@@ -48,7 +48,7 @@ export function Select({ label, options, id, className = '', ...props }: SelectP
   const selectId = id ?? label?.toLowerCase().replace(/\s+/g, '-')
 
   return (
-    <div className="space-y-1.5">
+    <div className="min-w-0 max-w-full space-y-1.5">
       {label && (
         <label
           htmlFor={selectId}

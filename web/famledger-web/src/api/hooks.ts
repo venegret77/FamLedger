@@ -16,6 +16,7 @@ import type {
   RecurringExpense,
   Reminder,
   ReminderAudience,
+  ReminderSchedule,
   CategorySpendingLimit,
   ReconciliationManualInput,
   ReconciliationView,
@@ -840,8 +841,9 @@ export function useCreateReminder() {
   return useMutation({
     mutationFn: (payload: {
       message: string
-      timeUtc: string
+      timeUtc?: string | null
       audience: ReminderAudience
+      schedule: ReminderSchedule
     }) =>
       apiFetch<Reminder>('/api/reminders', {
         method: 'POST',
@@ -849,6 +851,7 @@ export function useCreateReminder() {
           message: payload.message,
           timeUtc: payload.timeUtc,
           audience: payload.audience,
+          schedule: payload.schedule,
         },
       }),
     onSuccess: () => {
@@ -870,6 +873,7 @@ export function useUpdateReminder() {
       audience: ReminderAudience
       isEnabled: boolean
       thresholdPercents?: number[]
+      schedule?: ReminderSchedule | null
     }) =>
       apiFetch<Reminder>(`/api/reminders/${id}`, {
         method: 'PUT',

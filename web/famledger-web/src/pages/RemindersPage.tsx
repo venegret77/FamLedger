@@ -11,15 +11,18 @@ import { Card, CardTitle } from '../components/ui/Card'
 import { EmptyState, PageHeader, Spinner, Badge } from '../components/ui/Tabs'
 import { Button } from '../components/ui/Button'
 import { useConfirmDialog } from '../components/ui/ConfirmDialog'
+import { ReminderScheduleDialog } from '../components/ReminderScheduleDialog'
 import { Input, Select } from '../components/ui/Input'
 import {
   ThresholdEditor,
   normalizeThresholds,
 } from '../components/ThresholdEditor'
 import {
-  currentLocalTimeHm,
-  localTimeToUtc,
-  utcTimeToLocal,
+  draftToApi,
+  emptyScheduleDraft,
+  formatScheduleSummary,
+  scheduleFromApi,
+  type ScheduleDraft,
 } from '../lib/reminderTime'
 
 const STANDARD_META: Record<
@@ -29,7 +32,7 @@ const STANDARD_META: Record<
   DailyBalance: {
     title: 'Сводка по балансу',
     description:
-      'Ежедневно в заданное время — остаток, дневной бюджет и статистика. Не придёт, если за час до этого было любое действие в приложении или боте.',
+      'В выбранные дни и время — остаток, дневной бюджет и статистика. Не придёт, если за час до этого было любое действие в приложении или боте.',
     needsTime: true,
     needsThreshold: false,
   },
@@ -43,26 +46,26 @@ const STANDARD_META: Record<
   EveningCheckIn: {
     title: 'Вечерний чек-ин',
     description:
-      'Напоминание записать расходы за день. Не придёт, если за час до времени напоминания уже что-то записывали.',
+      'В выбранные дни напоминает записать расходы. Не придёт, если за час до времени уже что-то записывали.',
     needsTime: true,
     needsThreshold: false,
   },
   PeriodEnding: {
     title: 'Конец периода',
-    description: 'За 3 дня до конца периода — остаток и сколько дней осталось.',
+    description: 'В выбранные дни, когда до конца периода осталось не больше 3 дней.',
     needsTime: true,
     needsThreshold: false,
   },
   UnpaidDebts: {
     title: 'Незакрытые долги',
-    description: 'Раз в неделю список открытых долгов (если есть).',
+    description: 'В выбранные дни — список открытых долгов, не чаще раза в неделю.',
     needsTime: true,
     needsThreshold: false,
   },
   UnpaidPlanned: {
     title: 'Неоплаченные плановые',
     description:
-      'Если день списания постоянного расхода уже наступил, а он не отмечен оплаченным.',
+      'В выбранные дни, если день списания постоянного расхода уже наступил, а он не отмечен оплаченным.',
     needsTime: true,
     needsThreshold: false,
   },
@@ -79,9 +82,11 @@ export function RemindersPage() {
   const [editing, setEditing] = useState<Reminder | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [message, setMessage] = useState('')
-  const [timeLocal, setTimeLocal] = useState(currentLocalTimeHm)
+  const [scheduleDraft, setScheduleDraft] = useState<ScheduleDraft>(emptyScheduleDraft)
   const [audience, setAudience] = useState<ReminderAudience>('Self')
   const [isEnabled, setIsEnabled] = useState(true)
+  const [scheduleTarget, setScheduleTarget] = useState<Reminder | null>(null)
+  const [draftScheduleOpen, setDraftScheduleOpen] = useState(false)
 
   const isPersonal = settings?.isPersonal ?? true
   const audienceOptions = [
@@ -100,7 +105,7 @@ export function RemindersPage() {
   function openCreate() {
     setEditing(null)
     setMessage('')
-    setTimeLocal(currentLocalTimeHm())
+    setScheduleDraft(emptyScheduleDraft())
     setAudience('Self')
     setIsEnabled(true)
     setShowForm(true)
@@ -109,7 +114,7 @@ export function RemindersPage() {
   function openEditCustom(reminder: Reminder) {
     setEditing(reminder)
     setMessage(reminder.message ?? '')
-    setTimeLocal(reminder.timeUtc ? utcTimeToLocal(reminder.timeUtc) : currentLocalTimeHm())
+    setScheduleDraft(scheduleFromApi(reminder.schedule, reminder.timeUtc))
     setAudience(
       reminder.audience === 'Family' && !isPersonal ? 'Family' : 'Self',
     )
@@ -125,9 +130,10 @@ export function RemindersPage() {
   async function handleSubmit(event: FormEvent) {
     event.preventDefault()
     const trimmed = message.trim()
-    if (!trimmed || !timeLocal) return
+    if (!trimmed) return
+    if (!scheduleDraft.days.some((day) => day.enabled)) return
 
-    const timeUtc = localTimeToUtc(timeLocal)
+    const schedule = draftToApi(scheduleDraft)
     const nextAudience: ReminderAudience =
       audience === 'Family' && !isPersonal ? 'Family' : 'Self'
 
@@ -135,18 +141,34 @@ export function RemindersPage() {
       await updateReminder.mutateAsync({
         id: editing.id,
         message: trimmed,
-        timeUtc,
+        timeUtc: schedule.days[0]?.timeUtc,
         audience: nextAudience,
         isEnabled,
+        schedule,
       })
     } else {
       await createReminder.mutateAsync({
         message: trimmed,
-        timeUtc,
+        timeUtc: schedule.days[0]?.timeUtc,
         audience: nextAudience,
+        schedule,
       })
     }
     closeForm()
+  }
+
+  async function saveReminderSchedule(reminder: Reminder, draft: ScheduleDraft) {
+    const schedule = draftToApi(draft)
+    await updateReminder.mutateAsync({
+      id: reminder.id,
+      message: reminder.message,
+      timeUtc: schedule.days[0]?.timeUtc ?? reminder.timeUtc,
+      audience: reminder.audience,
+      isEnabled: reminder.isEnabled,
+      thresholdPercents: reminder.thresholdPercents,
+      schedule,
+    })
+    setScheduleTarget(null)
   }
 
   async function toggleStandard(reminder: Reminder, enabled: boolean) {
@@ -156,17 +178,6 @@ export function RemindersPage() {
       timeUtc: reminder.timeUtc,
       audience: reminder.audience,
       isEnabled: enabled,
-      thresholdPercents: reminder.thresholdPercents,
-    })
-  }
-
-  async function saveStandardTime(reminder: Reminder, localHm: string) {
-    await updateReminder.mutateAsync({
-      id: reminder.id,
-      message: reminder.message,
-      timeUtc: localTimeToUtc(localHm),
-      audience: reminder.audience,
-      isEnabled: reminder.isEnabled,
       thresholdPercents: reminder.thresholdPercents,
     })
   }
@@ -259,16 +270,19 @@ export function RemindersPage() {
                 {reminder.canEdit && reminder.isEnabled && (
                   <div className="grid gap-3 sm:grid-cols-2">
                     {meta.needsTime && (
-                      <Input
-                        label="Время (локальное)"
-                        type="time"
-                        value={
-                          reminder.timeUtc
-                            ? utcTimeToLocal(reminder.timeUtc)
-                            : currentLocalTimeHm()
-                        }
-                        onChange={(e) => void saveStandardTime(reminder, e.target.value)}
-                      />
+                      <div className="flex min-w-0 flex-col gap-2 sm:col-span-2 sm:flex-row sm:items-center sm:justify-between">
+                        <p className="text-sm text-slate-700">
+                          {formatScheduleSummary(reminder.schedule, reminder.timeUtc)}
+                        </p>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => setScheduleTarget(reminder)}
+                        >
+                          Расписание
+                        </Button>
+                      </div>
                     )}
                     {meta.needsThreshold && (
                       <div className="sm:col-span-2">
@@ -309,14 +323,18 @@ export function RemindersPage() {
               placeholder="Не забудь записать расходы"
               required
             />
+            <div className="flex min-w-0 flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-slate-700">Расписание</p>
+                <p className="mt-1 text-sm text-slate-600">
+                  {formatScheduleSummary(draftToApi(scheduleDraft))}
+                </p>
+              </div>
+              <Button type="button" variant="secondary" onClick={() => setDraftScheduleOpen(true)}>
+                Настроить
+              </Button>
+            </div>
             <div className="grid gap-4 sm:grid-cols-2">
-              <Input
-                label="Время (локальное)"
-                type="time"
-                value={timeLocal}
-                onChange={(e) => setTimeLocal(e.target.value)}
-                required
-              />
               <Select
                 label="Кому"
                 value={audience}
@@ -355,7 +373,7 @@ export function RemindersPage() {
         {!custom.length ? (
           <EmptyState
             title="Своих напоминаний пока нет"
-            description="Можно добавить свой ежедневный текст в Telegram."
+            description="Можно добавить свой текст в Telegram в выбранные дни и время."
             action={!showForm ? <Button onClick={openCreate}>Добавить</Button> : undefined}
           />
         ) : (
@@ -369,7 +387,7 @@ export function RemindersPage() {
                   <div className="min-w-0 space-y-1">
                     <p className="font-medium text-slate-900">{reminder.message}</p>
                     <p className="text-sm text-slate-500">
-                      {reminder.timeUtc ? utcTimeToLocal(reminder.timeUtc) : '—'} ·{' '}
+                      {formatScheduleSummary(reminder.schedule, reminder.timeUtc)} ·{' '}
                       {reminder.audience === 'Family' ? 'Вся семья' : 'Только я'}
                       {reminder.createdByName ? ` · ${reminder.createdByName}` : ''}
                     </p>
@@ -380,6 +398,13 @@ export function RemindersPage() {
                   </div>
                   {reminder.canEdit && (
                     <div className="flex shrink-0 flex-wrap gap-2">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => setScheduleTarget(reminder)}
+                      >
+                        Расписание
+                      </Button>
                       <Button
                         variant="secondary"
                         size="sm"
@@ -410,6 +435,26 @@ export function RemindersPage() {
           </Card>
         )}
       </div>
+
+      {scheduleTarget && (
+        <ReminderScheduleDialog
+          initial={scheduleFromApi(scheduleTarget.schedule, scheduleTarget.timeUtc)}
+          saving={updateReminder.isPending}
+          onCancel={() => setScheduleTarget(null)}
+          onSave={(draft) => void saveReminderSchedule(scheduleTarget, draft)}
+        />
+      )}
+
+      {draftScheduleOpen && (
+        <ReminderScheduleDialog
+          initial={scheduleDraft}
+          onCancel={() => setDraftScheduleOpen(false)}
+          onSave={(draft) => {
+            setScheduleDraft(draft)
+            setDraftScheduleOpen(false)
+          }}
+        />
+      )}
     </div>
   )
 }

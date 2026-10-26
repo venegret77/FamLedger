@@ -187,6 +187,7 @@ public interface IReminderService
         Domain.Enums.ReminderKind kind,
         IReadOnlyList<int>? thresholdPercents,
         bool isPersonalContext,
+        ReminderSchedule? schedule = null,
         CancellationToken ct = default);
     Task<Reminder> UpdateAsync(
         Guid id,
@@ -197,6 +198,7 @@ public interface IReminderService
         bool isEnabled,
         IReadOnlyList<int>? thresholdPercents,
         bool isPersonalContext,
+        ReminderSchedule? schedule = null,
         CancellationToken ct = default);
     Task DeleteAsync(Guid id, Guid userId, CancellationToken ct = default);
     Task<IReadOnlyList<Reminder>> GetDueTimedAsync(TimeOnly timeUtc, DateOnly todayUtc, CancellationToken ct = default);

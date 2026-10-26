@@ -21,7 +21,11 @@ public class NotificationService(
         if (botClient is null) return;
         try
         {
-            await botClient.SendMessage(telegramUserId, message, cancellationToken: ct);
+            await botClient.SendMessage(
+                telegramUserId,
+                message,
+                disableNotification: true,
+                cancellationToken: ct);
         }
         catch
         {
