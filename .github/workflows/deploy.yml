@@ -61,12 +61,29 @@ jobs:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
           set -euo pipefail
-          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ && "$DEPLOY_USER" != root ]]
-          [[ "$DEPLOY_HOST" =~ ^[[:alnum:]][[:alnum:].-]*$ && -n "$DEPLOY_SSH_KEY" ]]
+          if [[ ! "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
+            echo 'DEPLOY_USER must be a valid VPS username.' >&2
+            exit 1
+          fi
+          if [[ ! "$DEPLOY_HOST" =~ ^[[:alnum:]][[:alnum:].-]*$ || -z "$DEPLOY_SSH_KEY" ]]; then
+            echo 'Set DEPLOY_HOST and DEPLOY_SSH_KEY in GitHub Actions secrets.' >&2
+            exit 1
+          fi
           umask 077
           ssh_dir=$(mktemp -d)
           trap 'rm -f "$ssh_dir/key" "$ssh_dir/known_hosts"; rmdir "$ssh_dir"' EXIT
           printf '%s\n' "$DEPLOY_SSH_KEY" > "$ssh_dir/key"
           ssh -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new \
             -o UserKnownHostsFile="$ssh_dir/known_hosts" -i "$ssh_dir/key" \
-            "$DEPLOY_USER@$DEPLOY_HOST" "deploy/bin/deploy-famledger.sh $GITHUB_SHA"
+            "$DEPLOY_USER@$DEPLOY_HOST" bash -s -- "$GITHUB_SHA" <<'REMOTE'
+          set -euo pipefail
+          release=$1
+          [[ "$release" =~ ^[0-9a-f]{40}$ ]]
+          cd "${FAMLEDGER_APP_DIR:-$HOME/FamLedger}"
+          git fetch origin master
+          if [[ "$(git rev-parse origin/master)" != "$release" ]]; then
+            echo 'Skipping a superseded release.'
+            exit 0
+          fi
+          git show "$release:scripts/deploy-famledger.sh" | FAMLEDGER_APP_DIR="$PWD" bash -s -- "$release"
+          REMOTE

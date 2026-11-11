@@ -4,7 +4,7 @@
 param(
     [Parameter(Mandatory)] [string]$Repo,
     [Parameter(Mandatory)] [string]$DeployHost,
-    [Parameter(Mandatory)] [ValidatePattern('^(?!root$)[a-z_][a-z0-9_-]*$')] [string]$DeployUser
+    [Parameter(Mandatory)] [ValidatePattern('^[a-z_][a-z0-9_-]*$')] [string]$DeployUser
 )
 
 $ErrorActionPreference = "Stop"

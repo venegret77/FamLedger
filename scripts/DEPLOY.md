@@ -4,9 +4,9 @@ The workflow builds the solution, runs .NET tests against PostgreSQL and Redis, 
 
 ## VPS setup
 
-Use a dedicated non-root deploy account. Set up Docker access and transfer the existing database and object storage volumes if the account uses a different Docker daemon. Keep the existing deployment and data available until the new account has verified access to those volumes. The deploy directory must be clean and have a read-only GitHub deploy key. It defaults to the deploy account's FamLedger directory. Set FAMLEDGER_APP_DIR in the account's wrapper to use an existing checkout.
+Use the existing VPS account configured in DEPLOY_USER. The account needs Docker access and a clean Git checkout with access to the repository. The checkout defaults to FamLedger in the account's home directory. Set FAMLEDGER_APP_DIR in the remote SSH environment to use a different checkout.
 
-Install the repository's deploy script as deploy/bin/deploy-famledger.sh relative to the deploy user's home. Keep the wrapper outside the Git checkout. The workflow passes the verified commit SHA.
+The workflow fetches master and runs scripts/deploy-famledger.sh from the verified commit in that checkout.
 
 Set these GitHub Actions secrets.
 
