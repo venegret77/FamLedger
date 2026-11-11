@@ -3,6 +3,8 @@ using FamLedger.Domain.Enums;
 using FamLedger.Interfaces.Services;
 using FamLedger.Repository;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Moq;
 using Npgsql;
 using Xunit;
@@ -90,6 +92,49 @@ public sealed class PostgresAuditTests(PostgresAuditFixture fixture) : IClassFix
         {
             await using var session = fixture.Open();
             return await NewPeriodService(session).EnsureActivePeriodAsync(family);
+        }
+    }
+
+    [PostgresFact]
+    public async Task UpgradePreservesExistingOpenPeriodsAndTheirTransactions()
+    {
+        var legacy = new PostgresAuditFixture();
+        try
+        {
+            await using var db = legacy.Open();
+            await db.GetService<IMigrator>().MigrateAsync("20261026193000_ReminderSchedules");
+            var (budget, member) = await SeedBudgetAsync(db);
+            var first = new BudgetPeriod
+            {
+                ContextId = budget.Id, Label = "First",
+                StartDate = new DateOnly(2026, 1, 15), EndDate = new DateOnly(2026, 2, 14)
+            };
+            var second = new BudgetPeriod
+            {
+                ContextId = budget.Id, Label = "Second",
+                StartDate = new DateOnly(2026, 2, 15), EndDate = new DateOnly(2026, 3, 14)
+            };
+            db.AddRange(first, second);
+            db.Transactions.AddRange(
+                new Transaction { ContextId = budget.Id, PeriodId = first.Id, CreatedByUserId = member.UserId,
+                    Date = first.StartDate, Amount = 20, BaseAmount = 20 },
+                new Transaction { ContextId = budget.Id, PeriodId = second.Id, CreatedByUserId = member.UserId,
+                    Date = second.StartDate, Amount = 30, BaseAmount = 30 });
+            await db.SaveChangesAsync();
+
+            await db.Database.MigrateAsync();
+            Assert.Equal(2, await db.BudgetPeriods.CountAsync(period => period.ContextId == budget.Id && !period.IsClosed));
+            var rates = Mock.Of<IExchangeRateService>();
+            var periods = new BudgetPeriodService(db, rates, new BudgetCalculatorService(db, rates), new ContextService(db));
+            Assert.Equal(first.Id, (await periods.EnsureActivePeriodAsync(budget)).Id);
+            Assert.Equal(second.Id, (await periods.CloseActivePeriodAsync(budget.Id, member.UserId)).Id);
+            Assert.Equal(2, await db.BudgetPeriods.CountAsync(period => period.ContextId == budget.Id));
+            Assert.Equal(20m, await db.Transactions.Where(tx => tx.PeriodId == first.Id).SumAsync(tx => tx.Amount));
+            Assert.Equal(30m, await db.Transactions.Where(tx => tx.PeriodId == second.Id).SumAsync(tx => tx.Amount));
+        }
+        finally
+        {
+            await legacy.DisposeAsync();
         }
     }
 

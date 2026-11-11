@@ -59,7 +59,8 @@ public class GoalService(
 
         var period = await db.BudgetPeriods
             .Where(p => p.ContextId == goal.ContextId && !p.IsClosed)
-            .OrderByDescending(p => p.StartDate)
+            .OrderBy(p => p.StartDate)
+            .ThenBy(p => p.Id)
             .FirstOrDefaultAsync(ct)
             ?? throw new InvalidOperationException("No active period.");
 

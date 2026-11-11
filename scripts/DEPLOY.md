@@ -21,13 +21,7 @@ The API accepts forwarded headers from loopback and from the optional TRUSTED_PR
 
 Webhooks require an exact HTTPS URL from server configuration. Set App__AllowedWebhookUrls__0 and subsequent indexed values for individually approved destinations. Use destinations whose DNS and infrastructure you trust. Redirects are disabled. Leave the list empty to disable outbound webhooks.
 
-Before deploying the period constraint, run the following query and review the operations in any duplicate periods before resolving them.
-
-    SELECT "ContextId", count(*)
-    FROM budget_periods
-    WHERE NOT "IsClosed"
-    GROUP BY "ContextId"
-    HAVING count(*) > 1;
+The period migration preserves existing open periods and their transactions. If a budget has multiple open periods, the app selects the earliest one. After that period is closed, the app uses the next existing open period. It creates a new period only when none remain open.
 
 The deploy script checks API health, health through nginx, and the JavaScript content type. Automatic rollback requires all three previous application images. If Docker cannot retain one of them, the script logs a warning and continues the deploy. Image rollback does not roll back PostgreSQL migrations. Before a schema change, take a backup and decide whether restoring data is necessary if the migration is incompatible with the previous application.
 

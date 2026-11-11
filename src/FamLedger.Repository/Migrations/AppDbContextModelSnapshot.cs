@@ -89,7 +89,6 @@ namespace FamLedger.Repository.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("ContextId")
-                        .IsUnique()
                         .HasFilter("NOT \"IsClosed\"");
 
                     b.HasIndex("ContextId", "StartDate");

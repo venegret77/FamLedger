@@ -22,8 +22,7 @@ public class BudgetPeriodService(
 
     public async Task<BudgetPeriod> EnsureActivePeriodAsync(BudgetContext context, CancellationToken ct = default)
     {
-        var active = await db.BudgetPeriods
-            .FirstOrDefaultAsync(p => p.ContextId == context.Id && !p.IsClosed, ct);
+        var active = await FindOpenPeriodAsync(context.Id, ct);
 
         // Keep overdue periods open until the user starts a new month manually.
         if (active is not null)
@@ -31,7 +30,7 @@ public class BudgetPeriodService(
 
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         await db.LockBudgetAsync(context.Id, ct);
-        active = await db.BudgetPeriods.FirstOrDefaultAsync(p => p.ContextId == context.Id && !p.IsClosed, ct);
+        active = await FindOpenPeriodAsync(context.Id, ct);
         if (active is not null)
         {
             await transaction.CommitAsync(ct);
@@ -57,8 +56,7 @@ public class BudgetPeriodService(
         var context = await db.BudgetContexts.FindAsync([contextId], ct)
             ?? throw new InvalidOperationException("Context not found.");
 
-        var period = await db.BudgetPeriods
-            .FirstOrDefaultAsync(p => p.ContextId == contextId && !p.IsClosed, ct)
+        var period = await FindOpenPeriodAsync(contextId, ct)
             ?? throw new InvalidOperationException("Нет активного периода.");
 
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
@@ -95,6 +93,13 @@ public class BudgetPeriodService(
         period.IsClosed = true;
         await db.SaveChangesAsync(ct);
 
+        var existingOpenPeriod = await FindOpenPeriodAsync(context.Id, ct);
+        if (existingOpenPeriod is not null)
+        {
+            await transaction.CommitAsync(ct);
+            return existingOpenPeriod;
+        }
+
         var nextStart = period.EndDate.AddDays(1);
         var (start, end, label) = GetPeriodBounds(context, nextStart);
         var newPeriod = new BudgetPeriod
@@ -111,6 +116,12 @@ public class BudgetPeriodService(
         await transaction.CommitAsync(ct);
         return newPeriod;
     }
+
+    private Task<BudgetPeriod?> FindOpenPeriodAsync(Guid contextId, CancellationToken ct) =>
+        db.BudgetPeriods.Where(period => period.ContextId == contextId && !period.IsClosed)
+            .OrderBy(period => period.StartDate)
+            .ThenBy(period => period.Id)
+            .FirstOrDefaultAsync(ct);
 
     public async Task<IReadOnlyList<PeriodListItem>> GetPeriodsAsync(Guid contextId, CancellationToken ct = default)
     {
