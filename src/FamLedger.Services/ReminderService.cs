@@ -10,6 +10,7 @@ namespace FamLedger.Services;
 
 public class ReminderService(AppDbContext db) : IReminderService
 {
+    private static readonly TimeSpan DeliveryWindow = TimeSpan.FromHours(2);
     private static readonly ReminderKind[] StandardKinds =
     [
         ReminderKind.DailyBalance,
@@ -103,7 +104,7 @@ public class ReminderService(AppDbContext db) : IReminderService
             CreatedByUserId = userId,
             Kind = ReminderKind.Custom,
             Message = trimmed,
-            TimeUtc = ReminderScheduleRules.RepresentativeTime(normalized),
+            TimeUtc = normalized.TimeZoneId is null ? ReminderScheduleRules.RepresentativeTime(normalized) : null,
             ScheduleJson = ReminderScheduleRules.Serialize(normalized),
             Audience = audience,
             IsEnabled = true,
@@ -111,6 +112,7 @@ public class ReminderService(AppDbContext db) : IReminderService
             UpdatedAtUtc = DateTime.UtcNow,
         };
 
+        reminder.NextDueAtUtc = NextOccurrence(reminder, reminder.CreatedAtUtc);
         db.Reminders.Add(reminder);
         await db.SaveChangesAsync(ct);
         return reminder;
@@ -132,12 +134,14 @@ public class ReminderService(AppDbContext db) : IReminderService
 
         var reminder = await db.Reminders.FirstOrDefaultAsync(r => r.Id == id, ct)
             ?? throw new InvalidOperationException("Reminder not found");
-        if (reminder.CreatedByUserId != userId)
+        if (reminder.CreatedByUserId != userId || !await IsCurrentMemberAsync(reminder, userId, ct))
             throw new UnauthorizedAccessException("Only the creator can edit this reminder");
 
         if (reminder.Kind == ReminderKind.Custom)
             reminder.Message = ValidateMessage(message, required: true);
 
+        var previousSchedule = reminder.ScheduleJson;
+        var previousTime = reminder.TimeUtc;
         if (NeedsTime(reminder.Kind))
             ApplySchedule(reminder, schedule, timeUtc);
 
@@ -152,9 +156,15 @@ public class ReminderService(AppDbContext db) : IReminderService
                 reminder.Message = ValidateMessage(message, required: false);
         }
 
+        var scheduleChanged = previousSchedule != reminder.ScheduleJson || previousTime != reminder.TimeUtc
+            || reminder.IsEnabled != isEnabled || reminder.Audience != audience;
         reminder.Audience = audience;
         reminder.IsEnabled = isEnabled;
         reminder.UpdatedAtUtc = DateTime.UtcNow;
+        if (scheduleChanged)
+            reminder.NextDueAtUtc = isEnabled && NeedsTime(reminder.Kind)
+                ? NextOccurrence(reminder, reminder.UpdatedAtUtc)
+                : null;
         await db.SaveChangesAsync(ct);
         return reminder;
     }
@@ -163,7 +173,7 @@ public class ReminderService(AppDbContext db) : IReminderService
     {
         var reminder = await db.Reminders.FirstOrDefaultAsync(r => r.Id == id, ct)
             ?? throw new InvalidOperationException("Reminder not found");
-        if (reminder.CreatedByUserId != userId)
+        if (reminder.CreatedByUserId != userId || !await IsCurrentMemberAsync(reminder, userId, ct))
             throw new UnauthorizedAccessException("Only the creator can delete this reminder");
         if (reminder.Kind != ReminderKind.Custom)
             throw new InvalidOperationException("Standard reminders cannot be deleted; disable them instead");
@@ -172,33 +182,33 @@ public class ReminderService(AppDbContext db) : IReminderService
         await db.SaveChangesAsync(ct);
     }
 
-    public async Task<IReadOnlyList<Reminder>> GetDueTimedAsync(
-        TimeOnly timeUtc,
-        DateOnly todayUtc,
-        CancellationToken ct = default)
-    {
-        var utcNow = todayUtc.ToDateTime(new TimeOnly(timeUtc.Hour, timeUtc.Minute), DateTimeKind.Utc);
-        var candidates = await db.Reminders
-            .Include(r => r.CreatedByUser)
-            .Include(r => r.Context)
-            .Where(r =>
-                r.IsEnabled &&
-                (r.Kind == ReminderKind.Custom
-                 || r.Kind == ReminderKind.DailyBalance
-                 || r.Kind == ReminderKind.EveningCheckIn
-                 || r.Kind == ReminderKind.PeriodEnding
-                 || r.Kind == ReminderKind.UnpaidDebts
-                 || r.Kind == ReminderKind.UnpaidPlanned))
-            .ToListAsync(ct);
+    private Task<bool> IsCurrentMemberAsync(Reminder reminder, Guid userId, CancellationToken ct) =>
+        db.ContextMembers.AnyAsync(member => member.ContextId == reminder.ContextId && member.UserId == userId, ct);
 
-        return candidates
-            .Where(r => ReminderScheduleRules.IsDue(
-                r.ScheduleJson,
-                r.TimeUtc,
-                r.LastFiredAtUtc,
-                r.LastFiredDateUtc,
-                utcNow))
-            .ToList();
+    public async Task<IReadOnlyList<Reminder>> GetDueTimedAsync(DateTime utcNow, CancellationToken ct = default)
+    {
+        var earliest = utcNow - DeliveryWindow;
+        var timed = db.Reminders.Where(r => r.IsEnabled && r.Kind != ReminderKind.BudgetAlert
+            && (r.ScheduleJson != null || r.TimeUtc != null));
+        var unscheduled = await timed.AsNoTracking()
+            .Where(r => r.NextDueAtUtc == null || r.NextDueAtUtc < earliest)
+            .ToListAsync(ct);
+        foreach (var reminder in unscheduled)
+        {
+            var after = earliest.AddTicks(-1);
+            if (reminder.CreatedAtUtc > after) after = reminder.CreatedAtUtc;
+            if (reminder.LastFiredAtUtc is { } firedAt && firedAt > after) after = firedAt;
+            var next = NextOccurrence(reminder, after);
+            if (next is null) continue;
+            await timed.Where(r => r.Id == reminder.Id && r.NextDueAtUtc == reminder.NextDueAtUtc
+                    && r.UpdatedAtUtc == reminder.UpdatedAtUtc)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(r => r.NextDueAtUtc, next), ct);
+        }
+
+        return await timed.AsNoTracking().Include(r => r.Context)
+            .Where(r => r.NextDueAtUtc >= earliest && r.NextDueAtUtc <= utcNow)
+            .OrderBy(r => r.NextDueAtUtc)
+            .ToListAsync(ct);
     }
 
     public async Task<IReadOnlyList<Reminder>> GetEnabledBudgetAlertsAsync(
@@ -215,15 +225,21 @@ public class ReminderService(AppDbContext db) : IReminderService
             .ToListAsync(ct);
     }
 
-    public async Task MarkFiredAsync(Guid id, DateOnly todayUtc, CancellationToken ct = default)
+    public async Task CompleteTimedAsync(Reminder reminder, bool fired, CancellationToken ct = default)
     {
-        var reminder = await db.Reminders.FirstOrDefaultAsync(r => r.Id == id, ct);
-        if (reminder is null) return;
-        reminder.LastFiredDateUtc = todayUtc;
-        reminder.LastFiredAtUtc = DateTime.UtcNow;
-        reminder.UpdatedAtUtc = DateTime.UtcNow;
-        await db.SaveChangesAsync(ct);
+        if (reminder.NextDueAtUtc is not { } occurrence) return;
+        var next = NextOccurrence(reminder, occurrence);
+        var current = db.Reminders.Where(r => r.Id == reminder.Id && r.NextDueAtUtc == occurrence
+            && r.IsEnabled && r.UpdatedAtUtc == reminder.UpdatedAtUtc);
+        var occurrenceDate = DateOnly.FromDateTime(occurrence);
+        await current.ExecuteUpdateAsync(setters => setters
+            .SetProperty(r => r.NextDueAtUtc, next)
+            .SetProperty(r => r.LastFiredAtUtc, r => fired ? occurrence : r.LastFiredAtUtc)
+            .SetProperty(r => r.LastFiredDateUtc, r => fired ? occurrenceDate : r.LastFiredDateUtc), ct);
     }
+
+    private static DateTime? NextOccurrence(Reminder reminder, DateTime after) =>
+        ReminderScheduleRules.NextOccurrenceUtc(reminder.ScheduleJson, reminder.TimeUtc, after);
 
     public async Task<IReadOnlySet<int>> GetFiredThresholdsAsync(
         Guid reminderId,
@@ -303,7 +319,7 @@ public class ReminderService(AppDbContext db) : IReminderService
         {
             var normalized = ReminderScheduleRules.Normalize(schedule);
             reminder.ScheduleJson = ReminderScheduleRules.Serialize(normalized);
-            reminder.TimeUtc = ReminderScheduleRules.RepresentativeTime(normalized);
+            reminder.TimeUtc = normalized.TimeZoneId is null ? ReminderScheduleRules.RepresentativeTime(normalized) : null;
             return;
         }
 
@@ -315,7 +331,7 @@ public class ReminderService(AppDbContext db) : IReminderService
         }
 
         var existing = ReminderScheduleRules.Parse(reminder.ScheduleJson);
-        if (existing is { SameTimeEveryDay: false })
+        if (existing is { TimeZoneId: not null } or { SameTimeEveryDay: false })
             return;
 
         if (existing is { SameTimeEveryDay: true })

@@ -21,6 +21,7 @@ public class Reminder
     public bool IsEnabled { get; set; } = true;
     public DateOnly? LastFiredDateUtc { get; set; }
     public DateTime? LastFiredAtUtc { get; set; }
+    public DateTime? NextDueAtUtc { get; set; }
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
 

@@ -8,8 +8,15 @@ namespace FamLedger.Services;
 
 public class DebtService(AppDbContext db) : IDebtService
 {
-    public async Task<Debt> CreateAsync(Guid contextId, string counterpartyName, Guid? counterpartyUserId, DebtDirection direction, CancellationToken ct = default)
+    public async Task<Debt> CreateAsync(Guid contextId, Guid userId, string counterpartyName, Guid? counterpartyUserId, DebtDirection direction, CancellationToken ct = default)
     {
+        if (!await db.ContextMembers.AnyAsync(member => member.ContextId == contextId && member.UserId == userId, ct))
+            throw new UnauthorizedAccessException();
+
+        if (counterpartyUserId is { } counterparty
+            && !await db.ContextMembers.AnyAsync(member => member.ContextId == contextId && member.UserId == counterparty, ct))
+            throw new ArgumentException("Контрагент не входит в бюджет.");
+
         var existing = await FindExistingAsync(contextId, counterpartyName, counterpartyUserId, direction, ct);
         if (existing is not null)
             return existing;
@@ -46,8 +53,13 @@ public class DebtService(AppDbContext db) : IDebtService
             ct);
     }
 
-    public async Task<DebtEntry> AddEntryAsync(Guid debtId, decimal amount, string currency, string description, CancellationToken ct = default)
+    public async Task<DebtEntry> AddEntryAsync(Guid contextId, Guid userId, Guid debtId, decimal amount, string currency, string description, CancellationToken ct = default)
     {
+        if (!await AccessibleDebts(contextId, userId).AnyAsync(debt => debt.Id == debtId, ct))
+            throw new KeyNotFoundException();
+        if (amount <= 0)
+            throw new ArgumentException("Сумма должна быть больше нуля.");
+
         var entry = new DebtEntry
         {
             DebtId = debtId,
@@ -60,16 +72,16 @@ public class DebtService(AppDbContext db) : IDebtService
         return entry;
     }
 
-    public async Task ApplyEntryPaymentAsync(Guid entryId, decimal amount, CancellationToken ct = default)
+    public async Task ApplyEntryPaymentAsync(Guid contextId, Guid userId, Guid entryId, decimal amount, CancellationToken ct = default)
     {
-        var entry = await db.DebtEntries.FindAsync([entryId], ct) ?? throw new InvalidOperationException();
+        var entry = await GetAccessibleEntryAsync(contextId, userId, entryId, ct);
         entry.ApplyPayment(amount);
         await db.SaveChangesAsync(ct);
     }
 
-    public async Task ToggleEntryPaidAsync(Guid entryId, CancellationToken ct = default)
+    public async Task ToggleEntryPaidAsync(Guid contextId, Guid userId, Guid entryId, CancellationToken ct = default)
     {
-        var entry = await db.DebtEntries.FindAsync([entryId], ct) ?? throw new InvalidOperationException();
+        var entry = await GetAccessibleEntryAsync(contextId, userId, entryId, ct);
         if (entry.IsPaid || entry.PaidAmount > 0m)
             entry.ClearPayment();
         else
@@ -77,25 +89,28 @@ public class DebtService(AppDbContext db) : IDebtService
         await db.SaveChangesAsync(ct);
     }
 
-    public async Task DeleteAsync(Guid debtId, CancellationToken ct = default)
+    public async Task DeleteAsync(Guid contextId, Guid userId, Guid debtId, CancellationToken ct = default)
     {
-        var exists = await db.Debts.AnyAsync(d => d.Id == debtId, ct);
-        if (!exists) throw new InvalidOperationException();
+        var deleted = await AccessibleDebts(contextId, userId).Where(debt => debt.Id == debtId).ExecuteDeleteAsync(ct);
+        if (deleted == 0)
+            throw new KeyNotFoundException();
+    }
 
-        await db.DebtEntries
-            .Where(e => e.DebtId == debtId)
-            .ExecuteDeleteAsync(ct);
-        await db.Debts
-            .Where(d => d.Id == debtId)
-            .ExecuteDeleteAsync(ct);
+    public async Task DeleteEntryAsync(Guid contextId, Guid userId, Guid entryId, CancellationToken ct = default)
+    {
+        var entry = await GetAccessibleEntryAsync(contextId, userId, entryId, ct);
+        db.DebtEntries.Remove(entry);
         await db.SaveChangesAsync(ct);
     }
 
-    public async Task DeleteEntryAsync(Guid entryId, CancellationToken ct = default)
+    private IQueryable<Debt> AccessibleDebts(Guid contextId, Guid userId) =>
+        db.Debts.Where(debt => debt.ContextId == contextId && debt.Context.Members.Any(member => member.UserId == userId));
+
+    private async Task<DebtEntry> GetAccessibleEntryAsync(Guid contextId, Guid userId, Guid entryId, CancellationToken ct)
     {
-        var entry = await db.DebtEntries.FindAsync([entryId], ct) ?? throw new InvalidOperationException();
-        db.DebtEntries.Remove(entry);
-        await db.SaveChangesAsync(ct);
+        var debts = AccessibleDebts(contextId, userId);
+        return await db.DebtEntries.SingleOrDefaultAsync(entry => entry.Id == entryId && debts.Any(debt => debt.Id == entry.DebtId), ct)
+            ?? throw new KeyNotFoundException();
     }
 
     public async Task<IReadOnlyList<Debt>> GetByContextAsync(Guid contextId, bool hidePaid, CancellationToken ct = default)

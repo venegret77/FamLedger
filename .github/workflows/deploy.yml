@@ -3,24 +3,70 @@ name: Deploy
 on:
   push:
     branches: [master]
+  pull_request:
+    branches: [master]
   workflow_dispatch:
 
-concurrency:
-  group: deploy-famledger-production
-  cancel-in-progress: false
+permissions:
+  contents: read
 
 jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: famledger-ci
+        ports:
+          - 5432:5432
+        options: --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: --health-cmd "redis-cli ping" --health-interval 2s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/famledger-web/package-lock.json
+      - run: dotnet build FamLedger.slnx -c Release -warnaserror
+      - run: dotnet test FamLedger.slnx -c Release --no-build
+        env:
+          FAMLEDGER_TEST_POSTGRES: Host=127.0.0.1;Database=postgres;Username=postgres;Password=famledger-ci
+          FAMLEDGER_TEST_REDIS: 127.0.0.1:6379
+      - run: npm ci && npm test && npm run build && npm audit --audit-level=high
+        working-directory: web/famledger-web
+
   deploy:
+    if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
+    needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    concurrency:
+      group: deploy-famledger-production
+      cancel-in-progress: false
     steps:
       - name: Deploy to VPS
-        uses: appleboy/ssh-action@v1.2.2
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          command_timeout: 25m
-          script: |
-            set -euo pipefail
-            /root/deploy/bin/deploy-famledger.sh
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ && "$DEPLOY_USER" != root ]]
+          [[ "$DEPLOY_HOST" =~ ^[[:alnum:]][[:alnum:].-]*$ && -n "$DEPLOY_SSH_KEY" ]]
+          umask 077
+          ssh_dir=$(mktemp -d)
+          trap 'rm -f "$ssh_dir/key" "$ssh_dir/known_hosts"; rmdir "$ssh_dir"' EXIT
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$ssh_dir/key"
+          ssh -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new \
+            -o UserKnownHostsFile="$ssh_dir/known_hosts" -i "$ssh_dir/key" \
+            "$DEPLOY_USER@$DEPLOY_HOST" "deploy/bin/deploy-famledger.sh $GITHUB_SHA"

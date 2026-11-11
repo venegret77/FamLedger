@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch, ApiError, apiUpload } from './client'
 import type {
   AppSettings,
@@ -23,6 +23,8 @@ import type {
   SavingsResponse,
   StartNewPeriodResponse,
   Transaction,
+  TransactionPage,
+  TransactionTotals,
   UserProfile,
 } from './types'
 
@@ -74,14 +76,44 @@ export function useCategories() {
   })
 }
 
-export function useTransactions(periodId?: string) {
-  return useQuery({
-    queryKey: periodId ? [...queryKeys.transactions, periodId] as const : queryKeys.transactions,
-    queryFn: () =>
-      apiFetch<Transaction[]>(
-        periodId ? `/api/transactions?periodId=${periodId}` : '/api/transactions',
-      ),
+function fetchTransactionPage(offset: number, periodId?: string, signal?: AbortSignal) {
+  const query = new URLSearchParams({ offset: String(offset) })
+  if (periodId) query.set('periodId', periodId)
+  return apiFetch<TransactionPage>('/api/transactions?' + query.toString(), { signal })
+}
+
+export function useTransactions(periodId?: string, enabled = true) {
+  const { data: user } = useMe()
+  return useInfiniteQuery({
+    queryKey: [...queryKeys.transactions, 'pages', user?.activeContextId, periodId] as const,
+    initialPageParam: { offset: 0, periodId },
+    queryFn: ({ pageParam, signal }) => fetchTransactionPage(pageParam.offset, pageParam.periodId, signal),
+    getNextPageParam: (page) => page.nextOffset === null
+      ? undefined
+      : { offset: page.nextOffset, periodId: page.periodId },
+    select: (data) => data.pages.flatMap((page) => page.items),
+    enabled,
   })
+}
+
+export function useTransactionTotals(enabled = true) {
+  const { data: user } = useMe()
+  return useQuery({
+    queryKey: [...queryKeys.transactions, 'totals', user?.activeContextId] as const,
+    queryFn: ({ signal }) => apiFetch<TransactionTotals>('/api/transactions/totals', { signal }),
+    enabled,
+  })
+}
+
+export async function fetchTransactionsForReport(periodId: string): Promise<Transaction[]> {
+  const transactions: Transaction[] = []
+  let offset: number | null = 0
+  while (offset !== null) {
+    const page: TransactionPage = await fetchTransactionPage(offset, periodId)
+    transactions.push(...page.items)
+    offset = page.nextOffset
+  }
+  return transactions
 }
 
 export function usePeriods() {

@@ -41,18 +41,20 @@ public class BudgetCalculatorService(
             .SumAsync(x => Math.Round(x.BaseAmount, 4), ct);
 
         var plannedExpenses = recurringTotal + oneOffTotal;
-        var spent = await db.Transactions
-            .Where(t => t.PeriodId == period.Id && t.Kind == TransactionKind.Expense)
+        var totals = await db.Transactions
+            .Where(t => t.PeriodId == period.Id)
             .Where(t => t.BaseAmount > -FxConversion.MaxMoneyAmount && t.BaseAmount < FxConversion.MaxMoneyAmount)
-            .SumAsync(t => Math.Round(t.BaseAmount, 4), ct);
-        var topUps = await db.Transactions
-            .Where(t => t.PeriodId == period.Id && t.Kind == TransactionKind.Income)
-            .Where(t => t.BaseAmount > -FxConversion.MaxMoneyAmount && t.BaseAmount < FxConversion.MaxMoneyAmount)
-            .SumAsync(t => Math.Round(t.BaseAmount, 4), ct);
-        var spentToday = await db.Transactions
-            .Where(t => t.PeriodId == period.Id && t.Kind == TransactionKind.Expense && t.Date == today)
-            .Where(t => t.BaseAmount > -FxConversion.MaxMoneyAmount && t.BaseAmount < FxConversion.MaxMoneyAmount)
-            .SumAsync(t => Math.Round(t.BaseAmount, 4), ct);
+            .GroupBy(t => t.PeriodId)
+            .Select(group => new
+            {
+                Spent = group.Sum(t => t.Kind == TransactionKind.Expense ? Math.Round(t.BaseAmount, 4) : 0m),
+                TopUps = group.Sum(t => t.Kind == TransactionKind.Income ? Math.Round(t.BaseAmount, 4) : 0m),
+                SpentToday = group.Sum(t => t.Kind == TransactionKind.Expense && t.Date == today ? Math.Round(t.BaseAmount, 4) : 0m)
+            })
+            .SingleOrDefaultAsync(ct);
+        var spent = totals?.Spent ?? 0m;
+        var topUps = totals?.TopUps ?? 0m;
+        var spentToday = totals?.SpentToday ?? 0m;
         var spentBeforeToday = spent - spentToday;
 
         // Копилка не участвует. Остаток = плановые доходы + пополнения − план − факт.

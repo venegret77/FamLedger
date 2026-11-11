@@ -13,7 +13,7 @@ import {
   useReorderCategories,
   useSettings,
   useSwitchContext,
-  useTransactions,
+  useTransactionTotals,
   useUpdateBudgetSettings,
   useUpdateCategory,
   useUpdateCategoryLimit,
@@ -74,11 +74,11 @@ export function SettingsPage() {
     data: categoryLimits,
     isLoading: limitsLoading,
   } = useCategoryLimits()
-  const { data: transactions } = useTransactions()
+  const { data: transactionTotals } = useTransactionTotals()
   const createLimit = useCreateCategoryLimit()
   const updateLimit = useUpdateCategoryLimit()
   const deleteLimit = useDeleteCategoryLimit()
-  const limitProgressRows = useCategorySpendRows(transactions, categoryLimits).filter(
+  const limitProgressRows = useCategorySpendRows(transactionTotals?.categories, categoryLimits).filter(
     (r) => r.limitAmount != null,
   )
 

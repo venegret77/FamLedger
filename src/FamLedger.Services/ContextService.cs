@@ -126,17 +126,25 @@ public class ContextService(AppDbContext db) : IContextService
 
     public async Task UpdateMemberRoleAsync(Guid contextId, Guid memberId, FamilyMemberRole role, Guid headUserId, CancellationToken ct = default)
     {
+        if (!Enum.IsDefined(role)) throw new ArgumentException("Unknown family role.");
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await db.LockBudgetAsync(contextId, ct);
         var head = await GetMembershipAsync(contextId, headUserId, ct);
         if (head?.Role != FamilyMemberRole.Head) throw new UnauthorizedAccessException();
 
         var member = await db.ContextMembers.FindAsync([memberId], ct) ?? throw new InvalidOperationException("Member not found");
         if (member.ContextId != contextId) throw new InvalidOperationException("Member not found");
+        if (role != FamilyMemberRole.Head)
+            await EnsureAnotherHeadAsync(member, ct);
         member.Role = role;
         await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
     }
 
     public async Task RemoveMemberAsync(Guid contextId, Guid memberId, Guid actorUserId, CancellationToken ct = default)
     {
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await db.LockBudgetAsync(contextId, ct);
         var context = await db.BudgetContexts.FindAsync([contextId], ct)
             ?? throw new InvalidOperationException("Context not found");
         if (context.IsPersonal)
@@ -153,13 +161,11 @@ public class ContextService(AppDbContext db) : IContextService
         if (!removingSelf && actor.Role != FamilyMemberRole.Head)
             throw new UnauthorizedAccessException();
 
-        if (member.Role == FamilyMemberRole.Head)
-        {
-            var otherHeads = await db.ContextMembers.CountAsync(
-                m => m.ContextId == contextId && m.Role == FamilyMemberRole.Head && m.Id != member.Id, ct);
-            if (otherHeads == 0)
-                throw new InvalidOperationException("Cannot remove the only head. Assign another head first.");
-        }
+        await EnsureAnotherHeadAsync(member, ct);
+
+        await db.Reminders.Where(reminder => reminder.ContextId == contextId
+                && reminder.CreatedByUserId == member.UserId && reminder.Audience == ReminderAudience.Self)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(reminder => reminder.IsEnabled, false), ct);
 
         db.ContextMembers.Remove(member);
 
@@ -174,6 +180,16 @@ public class ContextService(AppDbContext db) : IContextService
         }
 
         await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+    }
+
+    private async Task EnsureAnotherHeadAsync(ContextMember member, CancellationToken ct)
+    {
+        if (member.Role != FamilyMemberRole.Head) return;
+        var anotherHead = await db.ContextMembers.AnyAsync(
+            row => row.ContextId == member.ContextId && row.Role == FamilyMemberRole.Head && row.Id != member.Id, ct);
+        if (!anotherHead)
+            throw new InvalidOperationException("Сначала назначь другого главу семьи.");
     }
 
     public async Task UpdateSettingsAsync(Guid contextId, int periodStartDay, string baseCurrency, Guid userId, CancellationToken ct = default)

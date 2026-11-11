@@ -15,6 +15,11 @@ public class TelegramBot(
     ITelegramBotClient botClient,
     IServiceScopeFactory scopeFactory)
 {
+    private const string PlannedPaymentPrefix = "plan_pay:";
+
+    public static InlineKeyboardButton CreatePlannedPaymentButton(Guid itemId, string name) =>
+        InlineKeyboardButton.WithCallbackData($"Оплатить: {name}", $"{PlannedPaymentPrefix}{itemId:N}");
+
     public Task StartReceivingAsync(CancellationToken ct)
     {
         var options = new ReceiverOptions { AllowedUpdates = [UpdateType.Message, UpdateType.CallbackQuery] };
@@ -58,6 +63,8 @@ public class TelegramBot(
 
         if (update.Message is { Text: not null } msg)
         {
+            if (msg.Chat.Type != ChatType.Private) return;
+
             var chatId = msg.Chat.Id;
             var telegramUserId = msg.From?.Id ?? chatId;
             var user = await userService.GetOrCreateByTelegramAsync(telegramUserId, msg.From?.Username, msg.From?.FirstName, ct);
@@ -207,7 +214,20 @@ public class TelegramBot(
 
         if (update.CallbackQuery is { Data: not null } cb)
         {
-            var chatId = cb.Message!.Chat.Id;
+            if (cb.Message?.Chat is not { Type: ChatType.Private } callbackChat || callbackChat.Id != cb.From.Id)
+            {
+                await client.AnswerCallbackQuery(cb.Id, "Открой личный чат с ботом", cancellationToken: ct);
+                return;
+            }
+
+            if (cb.Data.StartsWith(PlannedPaymentPrefix, StringComparison.Ordinal))
+            {
+                var recurringExpenses = sp.GetRequiredService<IRecurringExpenseService>();
+                await HandlePlannedPaymentAsync(client, cb, userService, recurringExpenses, ct);
+                return;
+            }
+
+            var chatId = callbackChat.Id;
             var telegramUserId = cb.From.Id;
             var user = await userService.GetOrCreateByTelegramAsync(
                 telegramUserId, cb.From.Username, cb.From.FirstName, ct);
@@ -236,6 +256,27 @@ public class TelegramBot(
                 await HandleDebtDirectionCallbackAsync(client, cb, chatId, user, dialogState, debtService, ct);
             }
         }
+    }
+
+    private static async Task HandlePlannedPaymentAsync(
+        ITelegramBotClient client,
+        CallbackQuery callback,
+        IUserService users,
+        IRecurringExpenseService recurringExpenses,
+        CancellationToken ct)
+    {
+        if (callback.Message?.Chat is not { Type: ChatType.Private } chat || chat.Id != callback.From.Id
+            || !Guid.TryParseExact(callback.Data![PlannedPaymentPrefix.Length..], "N", out var itemId))
+        {
+            await client.AnswerCallbackQuery(callback.Id, "Кнопка недоступна", cancellationToken: ct);
+            return;
+        }
+
+        var user = await users.GetOrCreateByTelegramAsync(
+            callback.From.Id, callback.From.Username, callback.From.FirstName, ct);
+        var markedPaid = await recurringExpenses.TryMarkPaidAsync(itemId, user.Id, ct);
+        var feedback = markedPaid ? "Отмечено как оплачено" : "Уже оплачено или больше недоступно";
+        await client.AnswerCallbackQuery(callback.Id, feedback, cancellationToken: ct);
     }
 
     private static async Task SendHelpAsync(
@@ -470,6 +511,8 @@ public class TelegramBot(
         var debtId = Guid.Parse(payload);
         var currency = state.PendingCurrency ?? "RSD";
         await debtService.AddEntryAsync(
+            state.PendingContextId.Value,
+            user.Id,
             debtId,
             state.PendingAmount.Value,
             currency,
@@ -504,12 +547,15 @@ public class TelegramBot(
         var direction = payload == "they" ? DebtDirection.TheyOwe : DebtDirection.WeOwe;
         var debt = await debtService.CreateAsync(
             state.PendingContextId.Value,
+            user.Id,
             state.PendingDebtName,
             null,
             direction,
             ct);
         var currency = state.PendingCurrency ?? "RSD";
         await debtService.AddEntryAsync(
+            state.PendingContextId.Value,
+            user.Id,
             debt.Id,
             state.PendingAmount.Value,
             currency,

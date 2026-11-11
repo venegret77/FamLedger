@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Security.Cryptography;
 using FamLedger.Interfaces.Services;
 
 namespace FamLedger.Services;
@@ -11,13 +13,10 @@ public class LoginTokenService(IRedisService redis) : ILoginTokenService
     {
         for (var attempt = 0; attempt < 20; attempt++)
         {
-            var token = Random.Shared.Next(0, 1_000_000).ToString($"D{CodeLength}");
-            var key = Key(token);
-            if (await redis.ExistsAsync(key))
-                continue;
-
-            await redis.SetAsync(key, telegramUserId.ToString(), TimeSpan.FromMinutes(10));
-            return token;
+            ct.ThrowIfCancellationRequested();
+            var token = RandomNumberGenerator.GetInt32(1_000_000).ToString("D6", CultureInfo.InvariantCulture);
+            if (await redis.TrySetAsync(Key(token), telegramUserId.ToString(CultureInfo.InvariantCulture), TimeSpan.FromMinutes(10)))
+                return token;
         }
 
         throw new InvalidOperationException("Could not allocate a unique login code");
@@ -28,18 +27,15 @@ public class LoginTokenService(IRedisService redis) : ILoginTokenService
         var normalized = NormalizeToken(token);
         if (normalized is null) return null;
 
-        var key = Key(normalized);
-        var value = await redis.GetAsync(key);
-        if (value is null) return null;
-        await redis.DeleteAsync(key);
-        return long.TryParse(value, out var id) ? id : null;
+        ct.ThrowIfCancellationRequested();
+        var value = await redis.GetAndDeleteAsync(Key(normalized));
+        return long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var id) ? id : null;
     }
 
     private static string? NormalizeToken(string? token)
     {
         if (string.IsNullOrWhiteSpace(token)) return null;
         var cleaned = token.Trim().Trim('`', '"', '\'');
-        cleaned = new string(cleaned.Where(char.IsAsciiDigit).ToArray());
-        return cleaned.Length == CodeLength ? cleaned : null;
+        return cleaned.Length == CodeLength && cleaned.All(char.IsAsciiDigit) ? cleaned : null;
     }
 }

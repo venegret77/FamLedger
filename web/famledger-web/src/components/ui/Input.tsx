@@ -1,4 +1,4 @@
-import type { InputHTMLAttributes } from 'react'
+import { useId, type InputHTMLAttributes } from 'react'
 
 interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   label?: string
@@ -14,7 +14,8 @@ export function Input({
   className = '',
   ...props
 }: InputProps) {
-  const inputId = id ?? label?.toLowerCase().replace(/\s+/g, '-')
+  const generatedId = useId()
+  const inputId = id ?? generatedId
 
   return (
     <div className="min-w-0 max-w-full space-y-1.5">
@@ -45,7 +46,8 @@ interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {
 }
 
 export function Select({ label, options, id, className = '', ...props }: SelectProps) {
-  const selectId = id ?? label?.toLowerCase().replace(/\s+/g, '-')
+  const generatedId = useId()
+  const selectId = id ?? generatedId
 
   return (
     <div className="min-w-0 max-w-full space-y-1.5">

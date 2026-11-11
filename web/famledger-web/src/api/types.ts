@@ -270,12 +270,25 @@ export type ReminderKind =
 export interface ReminderDaySlot {
   day: number
   enabled: boolean
-  timeUtc: string
+  timeUtc?: string | null
+  timeLocal?: string | null
 }
 
 export interface ReminderSchedule {
   sameTimeEveryDay: boolean
+  timeZoneId?: string | null
   days: ReminderDaySlot[]
+}
+
+export interface TransactionPage {
+  periodId: string
+  items: Transaction[]
+  nextOffset: number | null
+}
+
+export interface TransactionTotals {
+  categories: { categoryId: string | null; name: string | null; spent: number }[]
+  days: { date: string; net: number }[]
 }
 
 export interface Reminder {

@@ -129,7 +129,7 @@ export function PlanPage() {
                     )
                   }
                   return (
-                    <div className={`flex items-center justify-between gap-3 ${item.isSkipped ? 'opacity-60' : ''}`}>
+                    <div className={`flex flex-col justify-between gap-3 sm:flex-row sm:items-start ${item.isSkipped ? 'opacity-60' : ''}`}>
                       <div>
                         <p className={`font-medium text-slate-900 ${item.isSkipped ? 'line-through' : ''}`}>
                           {item.name}
@@ -151,27 +151,42 @@ export function PlanPage() {
                           ) : null}
                         </p>
                       </div>
-                      <div className="flex flex-wrap items-center justify-end gap-2">
+                      <div className="flex flex-wrap items-center gap-2 sm:justify-end">
                         <MoneyDisplay
                           amount={item.definitionAmount}
                           currency={item.definitionCurrency}
                         />
                         {canManagePlan && (
                           <>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => void toggleRecurringSkip.mutateAsync(item.id)}
-                            >
-                              {item.isSkipped ? 'Вернуть' : 'Нет в этом месяце'}
-                            </Button>
+                            {item.isSkipped ? (
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                onClick={() => void toggleRecurringSkip.mutateAsync(item.id)}
+                              >
+                                Вернуть в план
+                              </Button>
+                            ) : (
+                              <Button
+                                variant={item.isPaid ? 'secondary' : 'primary'}
+                                size="sm"
+                                onClick={() => void toggleRecurring.mutateAsync(item.id)}
+                              >
+                                {item.isPaid ? 'Снять отметку оплаты' : 'Оплатить'}
+                              </Button>
+                            )}
+                            <details className="relative">
+                              <summary className="cursor-pointer rounded-lg px-2 py-1 text-sm text-slate-600">
+                                Действия
+                              </summary>
+                              <div className="flex flex-wrap items-center gap-1 pt-1">
                             {!item.isSkipped && (
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => void toggleRecurring.mutateAsync(item.id)}
+                                onClick={() => void toggleRecurringSkip.mutateAsync(item.id)}
                               >
-                                {item.isPaid ? 'Снять' : 'Оплатить'}
+                                Пропустить в этом месяце
                               </Button>
                             )}
                             <Button
@@ -197,6 +212,8 @@ export function PlanPage() {
                             >
                               Удалить
                             </Button>
+                              </div>
+                            </details>
                           </>
                         )}
                       </div>
@@ -229,16 +246,16 @@ export function PlanPage() {
                         {item.isPaid ? 'Оплачено' : 'Не оплачено'}
                       </Badge>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center justify-end gap-2">
                       <MoneyDisplay amount={item.amount} currency={item.currency} />
                       {canManagePlan && (
                         <>
                           <Button
-                            variant="ghost"
+                            variant={item.isPaid ? 'secondary' : 'primary'}
                             size="sm"
                             onClick={() => void toggleOneOff.mutateAsync(item.id)}
                           >
-                            {item.isPaid ? 'Снять' : 'Оплатить'}
+                            {item.isPaid ? 'Снять отметку оплаты' : 'Оплатить'}
                           </Button>
                           <Button
                             variant="ghost"

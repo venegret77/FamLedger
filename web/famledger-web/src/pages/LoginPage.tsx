@@ -233,19 +233,24 @@ export function LoginPage() {
                 )}
 
                 <form
-                  className="flex gap-2"
+                  className="grid gap-2"
                   onSubmit={(e) => {
                     e.preventDefault()
                     const token = manualToken.trim()
-                    if (token) void finish(() => exchangeBotToken(token))
+                    if (token.length === 6) void finish(() => exchangeBotToken(token))
                   }}
                 >
+                  <label htmlFor="bot-login-code" className="text-sm font-medium text-slate-700">
+                    Код из бота
+                  </label>
+                  <div className="flex gap-2">
                   <input
+                    id="bot-login-code"
                     type="text"
                     inputMode="numeric"
                     value={manualToken}
                     onChange={(e) => setManualToken(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                    placeholder="Код из бота"
+                    placeholder="6 цифр"
                     className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
                     disabled={loading}
                     autoComplete="one-time-code"
@@ -254,10 +259,11 @@ export function LoginPage() {
                   <Button
                     type="submit"
                     variant="secondary"
-                    disabled={loading || manualToken.trim().length < 4}
+                    disabled={loading || manualToken.length !== 6}
                   >
                     Войти
                   </Button>
+                  </div>
                 </form>
 
                 <div className="relative flex items-center gap-3 py-1">
@@ -267,9 +273,6 @@ export function LoginPage() {
                 </div>
 
                 <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                  <p className="text-center text-sm font-medium text-slate-700">
-                    Войти через Telegram
-                  </p>
                   <div className="flex min-h-[44px] justify-center" ref={widgetHostRef} />
                 </div>
               </>

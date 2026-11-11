@@ -37,7 +37,7 @@ public interface IExpenseService
         DateOnly? date,
         Domain.Enums.TransactionKind kind = Domain.Enums.TransactionKind.Expense,
         CancellationToken ct = default);
-    Task<IReadOnlyList<Transaction>> GetByPeriodAsync(Guid periodId, CancellationToken ct = default);
+    Task<IReadOnlyList<Transaction>> GetPageAsync(Guid periodId, int offset, int limit, CancellationToken ct = default);
     Task DeleteAsync(Guid transactionId, Guid userId, CancellationToken ct = default);
 }
 
@@ -56,6 +56,7 @@ public interface IRecurringExpenseService
     Task<RecurringExpense> CreateAsync(Guid contextId, Guid userId, string name, decimal amount, string currency, int chargeDay, CancellationToken ct = default);
     Task<IReadOnlyList<PeriodRecurringItem>> GetPeriodItemsAsync(Guid periodId, CancellationToken ct = default);
     Task TogglePaidAsync(Guid itemId, Guid userId, CancellationToken ct = default);
+    Task<bool> TryMarkPaidAsync(Guid itemId, Guid userId, CancellationToken ct = default);
     Task ToggleSkippedAsync(Guid itemId, Guid userId, CancellationToken ct = default);
     Task DeleteAsync(Guid id, Guid userId, CancellationToken ct = default);
     Task UpdateAsync(Guid id, Guid userId, string name, decimal amount, string currency, int chargeDay, CancellationToken ct = default);
@@ -79,12 +80,12 @@ public interface IIncomeService
 
 public interface IDebtService
 {
-    Task<Debt> CreateAsync(Guid contextId, string counterpartyName, Guid? counterpartyUserId, Domain.Enums.DebtDirection direction, CancellationToken ct = default);
-    Task<DebtEntry> AddEntryAsync(Guid debtId, decimal amount, string currency, string description, CancellationToken ct = default);
-    Task ApplyEntryPaymentAsync(Guid entryId, decimal amount, CancellationToken ct = default);
-    Task ToggleEntryPaidAsync(Guid entryId, CancellationToken ct = default);
-    Task DeleteAsync(Guid debtId, CancellationToken ct = default);
-    Task DeleteEntryAsync(Guid entryId, CancellationToken ct = default);
+    Task<Debt> CreateAsync(Guid contextId, Guid userId, string counterpartyName, Guid? counterpartyUserId, Domain.Enums.DebtDirection direction, CancellationToken ct = default);
+    Task<DebtEntry> AddEntryAsync(Guid contextId, Guid userId, Guid debtId, decimal amount, string currency, string description, CancellationToken ct = default);
+    Task ApplyEntryPaymentAsync(Guid contextId, Guid userId, Guid entryId, decimal amount, CancellationToken ct = default);
+    Task ToggleEntryPaidAsync(Guid contextId, Guid userId, Guid entryId, CancellationToken ct = default);
+    Task DeleteAsync(Guid contextId, Guid userId, Guid debtId, CancellationToken ct = default);
+    Task DeleteEntryAsync(Guid contextId, Guid userId, Guid entryId, CancellationToken ct = default);
     Task<IReadOnlyList<Debt>> GetByContextAsync(Guid contextId, bool hidePaid, CancellationToken ct = default);
 }
 
@@ -152,9 +153,10 @@ public interface IAuthService
 
 public interface IFileStorageService
 {
-    Task<string> UploadAvatarAsync(Guid userId, Stream stream, string contentType, long size, CancellationToken ct = default);
+    Task<string> UploadAvatarAsync(Guid userId, Stream stream, long size, CancellationToken ct = default);
     Task<string?> GetAvatarUrlAsync(string? avatarKey, CancellationToken ct = default);
     Task<(Stream Stream, string ContentType)?> OpenReadAsync(string objectKey, CancellationToken ct = default);
+    Task DeleteAvatarAsync(string objectKey, CancellationToken ct = default);
 }
 
 public interface INotificationService
@@ -201,9 +203,9 @@ public interface IReminderService
         ReminderSchedule? schedule = null,
         CancellationToken ct = default);
     Task DeleteAsync(Guid id, Guid userId, CancellationToken ct = default);
-    Task<IReadOnlyList<Reminder>> GetDueTimedAsync(TimeOnly timeUtc, DateOnly todayUtc, CancellationToken ct = default);
+    Task<IReadOnlyList<Reminder>> GetDueTimedAsync(DateTime utcNow, CancellationToken ct = default);
     Task<IReadOnlyList<Reminder>> GetEnabledBudgetAlertsAsync(Guid contextId, CancellationToken ct = default);
-    Task MarkFiredAsync(Guid id, DateOnly todayUtc, CancellationToken ct = default);
+    Task CompleteTimedAsync(Reminder reminder, bool fired, CancellationToken ct = default);
     Task<IReadOnlySet<int>> GetFiredThresholdsAsync(Guid reminderId, DateOnly todayUtc, CancellationToken ct = default);
     Task MarkThresholdsFiredAsync(Guid reminderId, IEnumerable<int> thresholds, DateOnly todayUtc, CancellationToken ct = default);
 }

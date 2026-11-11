@@ -60,7 +60,13 @@ public static class ServiceCollectionExtensions
         {
             client.Timeout = TimeSpan.FromSeconds(15);
         });
-        services.AddHttpClient("webhooks");
+        services.AddHttpClient("webhooks", client => client.Timeout = TimeSpan.FromSeconds(5))
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+            {
+                AllowAutoRedirect = false,
+                UseProxy = false
+            });
+        services.AddSingleton<WebhookDestinations>();
 
         services
             .AddScoped<IUserService, UserService>()
@@ -93,7 +99,8 @@ public static class ServiceCollectionExtensions
                     sp.GetRequiredService<AppDbContext>(),
                     sp.GetRequiredService<Telegram.Bot.ITelegramBotClient>(),
                     sp.GetRequiredService<IHttpClientFactory>(),
-                    sp.GetRequiredService<IOptions<AppSettings>>()));
+                    sp.GetRequiredService<IOptions<AppSettings>>(),
+                    sp.GetRequiredService<WebhookDestinations>()));
         }
         else
         {
@@ -102,7 +109,8 @@ public static class ServiceCollectionExtensions
                     sp.GetRequiredService<AppDbContext>(),
                     null,
                     sp.GetRequiredService<IHttpClientFactory>(),
-                    sp.GetRequiredService<IOptions<AppSettings>>()));
+                    sp.GetRequiredService<IOptions<AppSettings>>(),
+                    sp.GetRequiredService<WebhookDestinations>()));
         }
 
         return services;

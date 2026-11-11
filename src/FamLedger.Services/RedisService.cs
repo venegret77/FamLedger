@@ -11,6 +11,15 @@ public class RedisService(IConnectionMultiplexer multiplexer) : IRedisService
     public Task SetAsync(string key, string value, TimeSpan? expiry = null) =>
         _db.StringSetAsync(key, value, expiry);
 
+    public Task<bool> TrySetAsync(string key, string value, TimeSpan expiry) =>
+        _db.StringSetAsync(key, value, expiry, when: When.NotExists);
+
+    public async Task<string?> GetAndDeleteAsync(string key)
+    {
+        var value = await _db.StringGetDeleteAsync(key);
+        return value.HasValue ? value.ToString() : null;
+    }
+
     public Task SetObjectAsync<T>(string key, T value, TimeSpan? expiry = null) =>
         _db.StringSetAsync(key, JsonSerializer.Serialize(value), expiry);
 

@@ -33,7 +33,8 @@ public class BudgetController(
         var user = await userService.GetByIdAsync(User.GetUserId(), ct)
             ?? throw new InvalidOperationException("User not found");
         if (user.ActiveContextId is null) throw new InvalidOperationException("No active context");
-        var context = await db.BudgetContexts.FindAsync([user.ActiveContextId.Value], ct)
+        var context = await db.BudgetContexts.FirstOrDefaultAsync(
+            context => context.Id == user.ActiveContextId && context.Members.Any(member => member.UserId == user.Id), ct)
             ?? throw new InvalidOperationException("Context not found");
         var period = await periodService.EnsureActivePeriodAsync(context, ct);
         return (context, period);
@@ -160,8 +161,12 @@ public class BudgetController(
         string? Kind);
 
     [HttpGet("transactions")]
-    public async Task<IActionResult> Transactions([FromQuery] Guid? periodId, CancellationToken ct)
+    public async Task<IActionResult> Transactions(
+        [FromQuery] Guid? periodId, [FromQuery] int offset = 0, [FromQuery] int limit = 50, CancellationToken ct = default)
     {
+        if (offset < 0 || limit is < 1 or > 100 || offset > int.MaxValue - limit)
+            return BadRequest(new { message = "Неверные параметры страницы." });
+
         var (context, activePeriod) = await GetActiveContextAsync(ct);
         var targetPeriodId = activePeriod.Id;
         if (periodId is not null && periodId != activePeriod.Id)
@@ -173,21 +178,55 @@ public class BudgetController(
             targetPeriodId = periodId.Value;
         }
 
-        var list = await expenseService.GetByPeriodAsync(targetPeriodId, ct);
-        return Ok(list.Select(t => new
+        var list = await expenseService.GetPageAsync(targetPeriodId, offset, limit + 1, ct);
+        return Ok(new
         {
-            t.Id,
-            t.Amount,
-            t.Currency,
-            t.BaseAmount,
-            Kind = t.Kind.ToString(),
-            t.Date,
-            t.Note,
-            categoryId = t.CategoryId,
-            categoryName = t.Category?.Name,
-            createdByName = t.CreatedByUser.DisplayName ?? t.CreatedByUser.FirstName,
-            t.CreatedAt
-        }));
+            periodId = targetPeriodId,
+            nextOffset = list.Count > limit ? (int?)(offset + limit) : null,
+            items = list.Take(limit).Select(t =>
+            {
+                var category = t.Category?.ContextId == t.ContextId ? t.Category : null;
+                return new
+                {
+                    t.Id,
+                    t.Amount,
+                    t.Currency,
+                    t.BaseAmount,
+                    Kind = t.Kind.ToString(),
+                    t.Date,
+                    t.Note,
+                    categoryId = category?.Id,
+                    categoryName = category?.Name,
+                    createdByName = t.CreatedByUser.DisplayName ?? t.CreatedByUser.FirstName,
+                    t.CreatedAt
+                };
+            })
+        });
+    }
+
+    [HttpGet("transactions/totals")]
+    public async Task<IActionResult> TransactionTotals(CancellationToken ct)
+    {
+        var (_, period) = await GetActiveContextAsync(ct);
+        var transactions = db.Transactions.AsNoTracking().Where(t => t.PeriodId == period.Id
+            && t.BaseAmount > -FamLedger.Common.FxConversion.MaxMoneyAmount
+            && t.BaseAmount < FamLedger.Common.FxConversion.MaxMoneyAmount);
+        var categories = await transactions.Where(t => t.Kind == Domain.Enums.TransactionKind.Expense)
+            .GroupBy(t => new
+            {
+                CategoryId = t.Category != null && t.Category.ContextId == t.ContextId ? t.CategoryId : null,
+                Name = t.Category != null && t.Category.ContextId == t.ContextId ? t.Category.Name : null
+            })
+            .Select(group => new { group.Key.CategoryId, group.Key.Name, Spent = group.Sum(t => Math.Round(t.BaseAmount, 4)) })
+            .ToListAsync(ct);
+        var days = await transactions.GroupBy(t => t.Date)
+            .Select(group => new
+            {
+                Date = group.Key,
+                Net = group.Sum(t => t.Kind == Domain.Enums.TransactionKind.Income
+                    ? Math.Round(t.BaseAmount, 4) : -Math.Round(t.BaseAmount, 4))
+            }).ToListAsync(ct);
+        return Ok(new { categories, days });
     }
 
     [HttpPost("transactions")]
@@ -196,20 +235,20 @@ public class BudgetController(
         var (context, _) = await GetActiveContextAsync(ct);
         var kind = Domain.Enums.TransactionKind.Expense;
         if (!string.IsNullOrWhiteSpace(request.Kind)
-            && !Enum.TryParse(request.Kind, ignoreCase: true, out kind))
+            && (!Enum.TryParse(request.Kind, ignoreCase: true, out kind) || !Enum.IsDefined(kind)))
             return BadRequest(new { message = "Invalid kind" });
 
         var userId = User.GetUserId();
-        var tx = await expenseService.AddAsync(
-            context.Id,
-            userId,
-            request.Amount,
-            request.Currency,
-            request.CategoryId,
-            request.Note,
-            request.Date,
-            kind,
-            ct);
+        Domain.Entities.Transaction tx;
+        try
+        {
+            tx = await expenseService.AddAsync(
+                context.Id, userId, request.Amount, request.Currency, request.CategoryId, request.Note, request.Date, kind, ct);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
 
         BudgetAlertInfo? budgetAlert = null;
         CategoryLimitAlertInfo? categoryLimitAlert = null;
@@ -252,8 +291,15 @@ public class BudgetController(
     [HttpDelete("transactions/{id:guid}")]
     public async Task<IActionResult> DeleteTransaction(Guid id, CancellationToken ct)
     {
-        await expenseService.DeleteAsync(id, User.GetUserId(), ct);
-        return Ok();
+        try
+        {
+            await expenseService.DeleteAsync(id, User.GetUserId(), ct);
+            return Ok();
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
     }
 
     [HttpGet("categories")]
@@ -536,49 +582,78 @@ public class BudgetController(
     public record DebtPaymentRequest(decimal Amount);
 
     [HttpPost("debts")]
-    public async Task<IActionResult> CreateDebt([FromBody] DebtRequest request, CancellationToken ct)
-    {
-        var (context, _) = await GetActiveContextAsync(ct);
-        var debt = await debtService.CreateAsync(context.Id, request.CounterpartyName, request.CounterpartyUserId, request.Direction, ct);
-        return Ok(new { debt.Id });
-    }
+    public Task<IActionResult> CreateDebt([FromBody] DebtRequest request, CancellationToken ct) =>
+        MutateDebtAsync(async (contextId, userId) =>
+        {
+            var debt = await debtService.CreateAsync(
+                contextId, userId, request.CounterpartyName, request.CounterpartyUserId, request.Direction, ct);
+            return Ok(new { debt.Id });
+        }, ct);
 
     [HttpPost("debts/{debtId:guid}/entries")]
-    public async Task<IActionResult> AddDebtEntry(Guid debtId, [FromBody] DebtEntryRequest request, CancellationToken ct)
-    {
-        var entry = await debtService.AddEntryAsync(debtId, request.Amount, request.Currency, request.Description, ct);
-        return Ok(new { entry.Id });
-    }
+    public Task<IActionResult> AddDebtEntry(Guid debtId, [FromBody] DebtEntryRequest request, CancellationToken ct) =>
+        MutateDebtAsync(async (contextId, userId) =>
+        {
+            var entry = await debtService.AddEntryAsync(
+                contextId, userId, debtId, request.Amount, request.Currency, request.Description, ct);
+            return Ok(new { entry.Id });
+        }, ct);
 
     [HttpPatch("debts/entries/{entryId:guid}/pay")]
-    public async Task<IActionResult> PayDebtEntry(Guid entryId, [FromBody] DebtPaymentRequest request, CancellationToken ct)
-    {
-        if (request.Amount <= 0)
-            return BadRequest(new { error = "Amount must be positive." });
-
-        await debtService.ApplyEntryPaymentAsync(entryId, request.Amount, ct);
-        return Ok();
-    }
+    public Task<IActionResult> PayDebtEntry(Guid entryId, [FromBody] DebtPaymentRequest request, CancellationToken ct) =>
+        MutateDebtAsync(async (contextId, userId) =>
+        {
+            await debtService.ApplyEntryPaymentAsync(contextId, userId, entryId, request.Amount, ct);
+            return Ok();
+        }, ct);
 
     [HttpPatch("debts/entries/{entryId:guid}/toggle-paid")]
-    public async Task<IActionResult> ToggleDebtPaid(Guid entryId, CancellationToken ct)
-    {
-        await debtService.ToggleEntryPaidAsync(entryId, ct);
-        return Ok();
-    }
+    public Task<IActionResult> ToggleDebtPaid(Guid entryId, CancellationToken ct) =>
+        MutateDebtAsync(async (contextId, userId) =>
+        {
+            await debtService.ToggleEntryPaidAsync(contextId, userId, entryId, ct);
+            return Ok();
+        }, ct);
 
     [HttpDelete("debts/{debtId:guid}")]
-    public async Task<IActionResult> DeleteDebt(Guid debtId, CancellationToken ct)
-    {
-        await debtService.DeleteAsync(debtId, ct);
-        return Ok();
-    }
+    public Task<IActionResult> DeleteDebt(Guid debtId, CancellationToken ct) =>
+        MutateDebtAsync(async (contextId, userId) =>
+        {
+            await debtService.DeleteAsync(contextId, userId, debtId, ct);
+            return Ok();
+        }, ct);
 
     [HttpDelete("debts/entries/{entryId:guid}")]
-    public async Task<IActionResult> DeleteDebtEntry(Guid entryId, CancellationToken ct)
+    public Task<IActionResult> DeleteDebtEntry(Guid entryId, CancellationToken ct) =>
+        MutateDebtAsync(async (contextId, userId) =>
+        {
+            await debtService.DeleteEntryAsync(contextId, userId, entryId, ct);
+            return Ok();
+        }, ct);
+
+    private async Task<IActionResult> MutateDebtAsync(
+        Func<Guid, Guid, Task<IActionResult>> mutate, CancellationToken ct)
     {
-        await debtService.DeleteEntryAsync(entryId, ct);
-        return Ok();
+        var userId = User.GetUserId();
+        var user = await userService.GetByIdAsync(userId, ct);
+        if (user?.ActiveContextId is not { } contextId) return NotFound();
+
+        try
+        {
+            return await mutate(contextId, userId);
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     [HttpGet("savings")]

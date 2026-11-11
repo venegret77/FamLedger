@@ -3,6 +3,7 @@ import {
   useCategoryLimits,
   useDeleteTransaction,
   useSettings,
+  useTransactionTotals,
   useTransactions,
 } from '../api/hooks'
 import { useConfirmDialog } from '../components/ui/ConfirmDialog'
@@ -21,14 +22,17 @@ const viewTabs = [
 ]
 
 export function TransactionsPage() {
-  const { data: transactions, isLoading, isError, refetch } = useTransactions()
+  const [activeTab, setActiveTab] = useState('list')
+  const { data: transactions, isLoading, isError, refetch, hasNextPage, fetchNextPage, isFetchingNextPage } =
+    useTransactions(undefined, activeTab !== 'category')
+  const totals = useTransactionTotals(activeTab !== 'list')
   const { data: settings } = useSettings()
   const { data: categoryLimits } = useCategoryLimits()
   const deleteTx = useDeleteTransaction()
   const { confirm } = useConfirmDialog()
-  const [activeTab, setActiveTab] = useState('list')
   const baseCurrency = settings?.baseCurrency ?? 'RSD'
-  const categoryRows = useCategorySpendRows(transactions, categoryLimits)
+  const categoryRows = useCategorySpendRows(totals.data?.categories, categoryLimits)
+  const netByDay = useMemo(() => new Map(totals.data?.days.map((day) => [day.date, day.net])), [totals.data])
 
   const byDay = useMemo(() => {
     if (!transactions?.length) return []
@@ -78,7 +82,18 @@ export function TransactionsPage() {
 
       <Tabs tabs={viewTabs} activeTab={activeTab} onChange={setActiveTab} />
 
-      {!transactions?.length ? (
+      {activeTab === 'category' ? (
+        <Card>
+          <CardTitle>По категориям</CardTitle>
+          {totals.isPending ? <Spinner /> : totals.isError ? (
+            <Button variant="secondary" onClick={() => void totals.refetch()}>Повторить загрузку</Button>
+          ) : categoryRows.length === 0 ? (
+            <p className="mt-4 text-sm text-slate-500">Расходов по категориям пока нет.</p>
+          ) : (
+            <CategorySpendProgressList rows={categoryRows} currency={baseCurrency} />
+          )}
+        </Card>
+      ) : !transactions?.length ? (
         <EmptyState
           title="Операций пока нет"
           description="Добавьте операцию на главной странице или через бота."
@@ -124,17 +139,14 @@ export function TransactionsPage() {
             ))}
           </ul>
         </Card>
-      ) : activeTab === 'day' ? (
+      ) : (
         <div className="space-y-4">
           {byDay.map(([date, items]) => {
-            const net = items.reduce((s, t) => {
-              const sign = (t.kind ?? 'Expense') === 'Income' ? 1 : -1
-              return s + sign * t.baseAmount
-            }, 0)
+            const net = netByDay.get(date)
             return (
               <Card key={date} padding="none">
                 <div className="border-b border-slate-100 px-5 py-3 font-medium text-slate-900">
-                  {formatDate(date)} · {formatMoney(net, baseCurrency)}
+                  {formatDate(date)}{net === undefined ? '' : ' · ' + formatMoney(net, baseCurrency)}
                 </div>
                 <ul className="divide-y divide-slate-100">
                   {items.map((tx) => (
@@ -153,18 +165,11 @@ export function TransactionsPage() {
             )
           })}
         </div>
-      ) : (
-        <Card>
-          <CardTitle>По категориям</CardTitle>
-          <p className="mt-1 text-sm text-slate-500">
-            Прогресс по лимитам за текущий период
-          </p>
-          {categoryRows.length === 0 ? (
-            <p className="mt-4 text-sm text-slate-500">Расходов по категориям пока нет.</p>
-          ) : (
-            <CategorySpendProgressList rows={categoryRows} currency={baseCurrency} />
-          )}
-        </Card>
+      )}
+      {activeTab !== 'category' && hasNextPage && (
+        <Button variant="secondary" loading={isFetchingNextPage} onClick={() => void fetchNextPage()}>
+          Загрузить ещё
+        </Button>
       )}
     </div>
   )

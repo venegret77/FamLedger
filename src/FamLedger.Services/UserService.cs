@@ -51,13 +51,21 @@ public class UserService(AppDbContext db, IRedisService redis) : IUserService
         return user;
     }
 
-    public async Task<User> SetAvatarKeyAsync(Guid userId, string avatarKey, CancellationToken ct = default)
+    public async Task<string?> ReplaceAvatarKeyAsync(Guid userId, string avatarKey, CancellationToken ct = default)
     {
-        var user = await db.Users.FindAsync([userId], ct) ?? throw new InvalidOperationException("User not found");
-        user.AvatarKey = avatarKey;
-        await db.SaveChangesAsync(ct);
-        await redis.DeleteAsync(CacheKeys.UserProfile(userId));
-        return user;
+        while (true)
+        {
+            var user = await db.Users.Where(user => user.Id == userId)
+                .Select(user => new { user.AvatarKey }).SingleOrDefaultAsync(ct)
+                ?? throw new InvalidOperationException("User not found");
+            var updated = await db.Users.Where(row => row.Id == userId && row.AvatarKey == user.AvatarKey)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(row => row.AvatarKey, avatarKey), ct);
+            if (updated == 1)
+            {
+                await redis.DeleteAsync(CacheKeys.UserProfile(userId));
+                return user.AvatarKey;
+            }
+        }
     }
 
     public async Task<User> SetActiveContextAsync(Guid userId, Guid contextId, CancellationToken ct = default)

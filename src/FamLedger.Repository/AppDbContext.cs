@@ -79,6 +79,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.ToTable("budget_periods");
             e.HasKey(x => x.Id);
             e.HasIndex(x => new { x.ContextId, x.StartDate });
+            e.HasIndex(x => x.ContextId).IsUnique().HasFilter("NOT \"IsClosed\"");
             e.Property(x => x.Label).HasMaxLength(64);
             e.HasOne(x => x.Context).WithMany(x => x.Periods).HasForeignKey(x => x.ContextId);
             e.HasOne(x => x.Snapshot).WithOne(x => x.Period).HasForeignKey<PeriodSnapshot>(x => x.PeriodId);
@@ -239,7 +240,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         {
             e.ToTable("reminders");
             e.HasKey(x => x.Id);
-            e.HasIndex(x => new { x.IsEnabled, x.TimeUtc });
+            e.HasIndex(x => new { x.IsEnabled, x.NextDueAtUtc });
             e.HasIndex(x => new { x.ContextId, x.Kind, x.CreatedByUserId });
             e.Property(x => x.Message).HasMaxLength(1000);
             e.Property(x => x.ScheduleJson).HasColumnType("jsonb");

@@ -1,6 +1,6 @@
 import type { ReminderSchedule } from '../api/types'
 
-/** "HH:mm" helpers: UI shows local time, API stores UTC. */
+/** Convert legacy UTC schedules when opening them in the browser. */
 
 function pad(n: number): string {
   return String(n).padStart(2, '0')
@@ -51,6 +51,7 @@ export interface ScheduleDraft {
   sameTimeEveryDay: boolean
   sharedTimeLocal: string
   days: LocalDayDraft[]
+  timeZoneId?: string
 }
 
 function isoWeekday(date: Date, utc: boolean): number {
@@ -106,13 +107,18 @@ export function scheduleFromApi(
   const byLocalDay = new Map<number, string>()
   for (const slot of schedule.days) {
     if (!slot.enabled) continue
-    const local = utcSlotToLocal(slot.day, slot.timeUtc)
-    byLocalDay.set(local.day, local.timeLocal)
+    if (schedule.timeZoneId && slot.timeLocal) {
+      byLocalDay.set(slot.day, slot.timeLocal)
+    } else if (slot.timeUtc) {
+      const local = utcSlotToLocal(slot.day, slot.timeUtc)
+      byLocalDay.set(local.day, local.timeLocal)
+    }
   }
 
   const firstTime = byLocalDay.values().next().value ?? fallbackLocal
   return {
     sameTimeEveryDay: schedule.sameTimeEveryDay,
+    timeZoneId: schedule.timeZoneId ?? undefined,
     sharedTimeLocal: firstTime,
     days: WEEKDAYS.map((day) => ({
       day: day.day,
@@ -125,13 +131,14 @@ export function scheduleFromApi(
 export function draftToApi(draft: ScheduleDraft): ReminderSchedule {
   return {
     sameTimeEveryDay: draft.sameTimeEveryDay,
+    timeZoneId: draft.timeZoneId ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
     days: draft.days
       .filter((day) => day.enabled)
-      .map((day) => {
-        const localTime = draft.sameTimeEveryDay ? draft.sharedTimeLocal : day.timeLocal
-        const utc = localSlotToUtc(day.day, localTime)
-        return { day: utc.day, enabled: true, timeUtc: utc.timeUtc }
-      }),
+      .map((day) => ({
+        day: day.day,
+        enabled: true,
+        timeLocal: draft.sameTimeEveryDay ? draft.sharedTimeLocal : day.timeLocal,
+      })),
   }
 }
 
@@ -144,10 +151,13 @@ export function formatScheduleSummary(
   if (enabled.length === 0) return 'Дни не выбраны'
 
   const labels = Object.fromEntries(WEEKDAYS.map((day) => [day.day, day.short]))
+  const zone = draft.timeZoneId && draft.timeZoneId !== Intl.DateTimeFormat().resolvedOptions().timeZone
+    ? ' · ' + draft.timeZoneId
+    : ''
   if (draft.sameTimeEveryDay) {
-    if (enabled.length === 7) return `Каждый день в ${draft.sharedTimeLocal}`
-    return `${enabled.map((day) => labels[day.day]).join(', ')} в ${draft.sharedTimeLocal}`
+    if (enabled.length === 7) return `Каждый день в ${draft.sharedTimeLocal}` + zone
+    return `${enabled.map((day) => labels[day.day]).join(', ')} в ${draft.sharedTimeLocal}` + zone
   }
 
-  return enabled.map((day) => `${labels[day.day]} ${day.timeLocal}`).join(', ')
+  return enabled.map((day) => `${labels[day.day]} ${day.timeLocal}`).join(', ') + zone
 }

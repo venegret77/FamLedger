@@ -14,7 +14,8 @@ public class NotificationService(
     AppDbContext db,
     ITelegramBotClient? botClient,
     IHttpClientFactory httpClientFactory,
-    IOptions<AppSettings> settings) : INotificationService
+    IOptions<AppSettings> settings,
+    WebhookDestinations webhookDestinations) : INotificationService
 {
     public async Task SendTelegramAsync(long telegramUserId, string message, CancellationToken ct = default)
     {
@@ -98,16 +99,19 @@ public class NotificationService(
 
         foreach (var endpoint in endpoints)
         {
+            var destination = webhookDestinations.Resolve(endpoint.Url);
+            if (destination is null) continue;
+
             try
             {
-                using var request = new HttpRequestMessage(HttpMethod.Post, endpoint.Url)
+                using var request = new HttpRequestMessage(HttpMethod.Post, destination)
                 {
                     Content = JsonContent.Create(body)
                 };
                 request.Headers.TryAddWithoutValidation("X-FamLedger-Secret", endpoint.Secret);
-                await client.SendAsync(request, ct);
+                using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
             }
-            catch
+            catch (Exception) when (!ct.IsCancellationRequested)
             {
                 // ignore failed webhook delivery
             }

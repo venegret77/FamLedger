@@ -8,10 +8,12 @@ namespace FamLedger.Api.Extensions;
 
 public static class AuthExtensions
 {
-    public static IServiceCollection AddFamLedgerAuth(this IServiceCollection services, IAppSettings settings)
+    public static IServiceCollection AddFamLedgerAuth(this IServiceCollection services)
     {
         services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-            .AddJwtBearer(options =>
+            .AddJwtBearer();
+        services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
+            .Configure<IAppSettings>((options, settings) =>
             {
                 options.TokenValidationParameters = new TokenValidationParameters
                 {

@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useId, useLayoutEffect, useRef, useState, type FormEvent } from 'react'
 import { Button } from './ui/Button'
 import {
   WEEKDAYS,
@@ -20,6 +20,19 @@ export function ReminderScheduleDialog({
 }: ReminderScheduleDialogProps) {
   const [draft, setDraft] = useState(initial)
   const [error, setError] = useState('')
+  const dialogRef = useRef<HTMLDialogElement>(null)
+  const titleId = useId()
+
+  useLayoutEffect(() => {
+    const dialog = dialogRef.current
+    if (!dialog) return
+    const previousFocus = document.activeElement
+    dialog.showModal()
+    return () => {
+      dialog.close()
+      if (previousFocus instanceof HTMLElement) previousFocus.focus()
+    }
+  }, [])
 
   function updateDay(day: number, patch: Partial<ScheduleDraft['days'][number]>) {
     setDraft((current) => ({
@@ -49,15 +62,25 @@ export function ReminderScheduleDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/50 px-4 py-4 sm:items-center">
+    <dialog
+      ref={dialogRef}
+      aria-labelledby={titleId}
+      className="fixed inset-x-0 bottom-4 top-auto m-auto w-[calc(100%_-_2rem)] max-w-md rounded-3xl bg-white p-0 shadow-xl backdrop:bg-slate-950/50 sm:inset-0"
+      onCancel={(event) => {
+        event.preventDefault()
+        if (!saving) onCancel()
+      }}
+    >
       <form
         className="flex max-h-[90dvh] w-full max-w-md flex-col overflow-hidden rounded-3xl bg-white shadow-2xl"
         onSubmit={handleSubmit}
       >
         <div className="space-y-4 overflow-y-auto p-6">
           <div>
-            <h2 className="text-lg font-semibold text-slate-900">Когда присылать</h2>
-            <p className="mt-1 text-sm text-slate-500">Время местное. Можно выбрать отдельные дни.</p>
+            <h2 id={titleId} className="text-lg font-semibold text-slate-900">Когда присылать</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Часовой пояс {draft.timeZoneId ?? Intl.DateTimeFormat().resolvedOptions().timeZone}
+            </p>
           </div>
 
           <label className="flex items-center gap-2 text-sm text-slate-800">
@@ -112,6 +135,7 @@ export function ReminderScheduleDialog({
                   </label>
                   <input
                     type="time"
+                    aria-label={`Время · ${weekday.label}`}
                     value={timeValue}
                     disabled={timeDisabled}
                     onChange={(event) => updateDay(weekday.day, { timeLocal: event.target.value })}
@@ -122,7 +146,7 @@ export function ReminderScheduleDialog({
             })}
           </ul>
 
-          {error && <p className="text-sm text-red-600">{error}</p>}
+          {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
         </div>
 
         <div className="flex justify-end gap-3 border-t border-slate-100 px-6 py-4">
@@ -134,6 +158,6 @@ export function ReminderScheduleDialog({
           </Button>
         </div>
       </form>
-    </div>
+    </dialog>
   )
 }

@@ -31,19 +31,28 @@ public static class ReminderScheduleRules
 
     public static ReminderSchedule Normalize(ReminderSchedule input)
     {
+        if (input.TimeZoneId is not null && !TimeZoneInfo.TryFindSystemTimeZoneById(input.TimeZoneId, out _))
+            throw new InvalidOperationException("Unknown time zone.");
+
         var enabled = new List<ReminderDaySlot>();
+        var weekdays = new HashSet<int>();
         foreach (var day in input.Days)
         {
             if (day.Day is < 1 or > 7)
                 throw new InvalidOperationException("Day must be from 1 (Monday) to 7 (Sunday)");
             if (!day.Enabled)
                 continue;
+            if (input.TimeZoneId is not null && !weekdays.Add(day.Day))
+                throw new InvalidOperationException("Each weekday can appear only once.");
+            if (input.TimeZoneId is not null && day.TimeLocal is null)
+                throw new InvalidOperationException("Local time is required for a zoned schedule.");
 
             enabled.Add(new ReminderDaySlot
             {
                 Day = day.Day,
                 Enabled = true,
                 TimeUtc = new TimeOnly(day.TimeUtc.Hour, day.TimeUtc.Minute),
+                TimeLocal = day.TimeLocal,
             });
         }
 
@@ -53,6 +62,7 @@ public static class ReminderScheduleRules
         return new ReminderSchedule
         {
             SameTimeEveryDay = input.SameTimeEveryDay,
+            TimeZoneId = input.TimeZoneId,
             Days = enabled
                 .OrderBy(day => day.Day)
                 .ThenBy(day => day.TimeUtc)
@@ -94,6 +104,36 @@ public static class ReminderScheduleRules
         if (first is null)
             throw new InvalidOperationException("At least one weekday is required");
         return first.TimeUtc;
+    }
+
+    public static DateTime? NextOccurrenceUtc(string? scheduleJson, TimeOnly? fallbackTimeUtc, DateTime afterUtc)
+    {
+        var schedule = Resolve(scheduleJson, fallbackTimeUtc);
+        if (schedule is null) return null;
+
+        var zone = TimeZoneInfo.Utc;
+        if (schedule.TimeZoneId is not null
+            && !TimeZoneInfo.TryFindSystemTimeZoneById(schedule.TimeZoneId, out zone))
+            return null;
+
+        var localDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(afterUtc, zone));
+        DateTime? next = null;
+        for (var offset = 0; offset <= 7; offset++)
+        {
+            var date = localDate.AddDays(offset);
+            var weekday = ToIsoWeekday(date.DayOfWeek);
+            foreach (var day in schedule.Days)
+            {
+                if (!day.Enabled || day.Day != weekday) continue;
+                var local = date.ToDateTime(day.TimeLocal ?? day.TimeUtc);
+                while (zone.IsInvalidTime(local))
+                    local = local.AddMinutes(1);
+                var occurrence = TimeZoneInfo.ConvertTimeToUtc(local, zone);
+                if (occurrence > afterUtc && (next is null || occurrence < next))
+                    next = occurrence;
+            }
+        }
+        return next;
     }
 
     public static bool IsDue(

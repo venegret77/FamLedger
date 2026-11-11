@@ -102,8 +102,23 @@ public class ContextsController(IContextService contextService, IUserService use
     [HttpPatch("{contextId:guid}/members/role")]
     public async Task<IActionResult> UpdateRole(Guid contextId, [FromBody] UpdateRoleRequest request, CancellationToken ct)
     {
-        await contextService.UpdateMemberRoleAsync(contextId, request.MemberId, request.Role, User.GetUserId(), ct);
-        return Ok();
+        try
+        {
+            await contextService.UpdateMemberRoleAsync(contextId, request.MemberId, request.Role, User.GetUserId(), ct);
+            return Ok();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new { message = ex.Message });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     [HttpDelete("{contextId:guid}/members/{memberId:guid}")]

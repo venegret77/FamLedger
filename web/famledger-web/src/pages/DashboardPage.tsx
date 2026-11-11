@@ -6,7 +6,7 @@ import {
   useDashboard,
   usePermissions,
   useStartNewPeriod,
-  useTransactions,
+  useTransactionTotals,
 } from '../api/hooks'
 import { Card, CardTitle } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
@@ -31,11 +31,11 @@ export function DashboardPage() {
   const { canManagePlan } = usePermissions()
   const { data: summary, isLoading, isError, refetch } = useDashboard()
   const { data: categories } = useCategories()
-  const { data: transactions } = useTransactions()
+  const { data: transactionTotals } = useTransactionTotals()
   const { data: categoryLimits } = useCategoryLimits()
   const createTransaction = useCreateTransaction()
   const startNewPeriod = useStartNewPeriod()
-  const categoryRows = useCategorySpendRows(transactions, categoryLimits)
+  const categoryRows = useCategorySpendRows(transactionTotals?.categories, categoryLimits)
 
   const [mode, setMode] = useState<TxMode>('Expense')
   const [amount, setAmount] = useState('')
@@ -191,22 +191,18 @@ export function DashboardPage() {
           breakdown={breakdown}
         />
         <StatCard
-          label="Дневной бюджет"
+          label="План на день"
           amount={summary.dailyBudgetAtStart}
           currency={currency}
-          hint={`На период ${summary.daysInPeriod} дн. · осталось ${summary.daysRemaining} дн.`}
+          hint={`Среднее за ${summary.daysInPeriod} дн. · осталось ${summary.daysRemaining} дн.`}
         />
         <StatCard
           label="Доступно сегодня"
           amount={summary.availableToday}
           currency={currency}
-          hint={`Потрачено сегодня: ${formatMoney(summary.spentToday, currency)}`}
+          hint={`С учётом прошлых дней · сегодня потрачено ${formatMoney(summary.spentToday, currency)}`}
         />
       </div>
-
-      {categoryRows.length > 0 && (
-        <DashboardCategorySpend rows={categoryRows} currency={currency} />
-      )}
 
       <Card>
         <CardTitle>Быстрая операция</CardTitle>
@@ -260,6 +256,10 @@ export function DashboardPage() {
           </Button>
         </form>
       </Card>
+
+      {categoryRows.length > 0 && (
+        <DashboardCategorySpend rows={categoryRows} currency={currency} />
+      )}
 
       <MobileMoreMenu />
     </div>

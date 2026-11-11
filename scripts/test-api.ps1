@@ -1,11 +1,16 @@
-# FamLedger API smoke test (uses curl + cookie jar)
+# Run only against a disposable local API, PostgreSQL, and Redis stack.
+param(
+    [Parameter(Mandatory)] [ValidateRange(1024, 65535)] [int]$ApiPort,
+    [Parameter(Mandatory)] [ValidatePattern('^famledger-(audit|test)-redis$')] [string]$RedisContainer
+)
+
 $ErrorActionPreference = "Continue"
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Set-Location $Root
-$Base = "http://localhost:8080"
-$CookieJar = Join-Path $env:TEMP "famledger-smoke-cookies.txt"
-$BodyFile = Join-Path $env:TEMP "famledger-smoke-body.json"
-Remove-Item $CookieJar -ErrorAction SilentlyContinue
+$Base = "http://127.0.0.1:$ApiPort"
+$runId = [guid]::NewGuid().ToString("N")
+$CookieJar = Join-Path $env:TEMP "famledger-smoke-$runId-cookies.txt"
+$BodyFile = Join-Path $env:TEMP "famledger-smoke-$runId-body.json"
 $results = @()
 
 function Test-Endpoint {
@@ -38,8 +43,10 @@ function Test-Endpoint {
 }
 
 Write-Host "=== Auth ==="
-$token = [guid]::NewGuid().ToString("N")
-docker compose exec -T redis redis-cli SET "login:bot:$token" 861420063 EX 600 | Out-Null
+$token = [System.Security.Cryptography.RandomNumberGenerator]::GetInt32(1000000).ToString("D6")
+$testTelegramId = Get-Random -Minimum 10000000000 -Maximum 90000000000
+$created = docker exec $RedisContainer redis-cli SET "login:bot:$token" $testTelegramId EX 60 NX
+if ($LASTEXITCODE -ne 0 -or $created -ne "OK") { throw "Could not reserve the fixture login code." }
 Test-Endpoint -Method POST -Path "/api/auth/bot" -Body @{ token = $token } | Out-Null
 if (-not $results[-1].Ok) { exit 1 }
 
@@ -52,6 +59,7 @@ Test-Endpoint -Path "/api/family" | Out-Null
 Test-Endpoint -Path "/api/family/settings" | Out-Null
 Test-Endpoint -Path "/api/dashboard/summary" | Out-Null
 Test-Endpoint -Path "/api/transactions" | Out-Null
+Test-Endpoint -Path "/api/transactions/totals" | Out-Null
 Test-Endpoint -Path "/api/categories" | Out-Null
 Test-Endpoint -Path "/api/plan/recurring" | Out-Null
 Test-Endpoint -Path "/api/plan/one-off" | Out-Null
@@ -61,7 +69,7 @@ Test-Endpoint -Path "/api/savings" | Out-Null
 Test-Endpoint -Path "/api/webhooks" | Out-Null
 
 Write-Host "`n=== Mutations ==="
-Test-Endpoint -Method PATCH -Path "/api/users/me" -Body @{ displayName = "Mikhail" } | Out-Null
+Test-Endpoint -Method PATCH -Path "/api/users/me" -Body @{ displayName = "Synthetic smoke test" } | Out-Null
 $cat = Test-Endpoint -Method POST -Path "/api/categories" -Body @{ name = "ApiTestCat" }
 $catId = ($cat | ConvertFrom-Json).id
 $tx = Test-Endpoint -Method POST -Path "/api/transactions" -Body @{ amount = 100; currency = "RSD"; categoryId = $catId; note = "smoke" }
@@ -119,6 +127,7 @@ Test-Endpoint -Method POST -Path "/api/auth/logout" | Out-Null
 Test-Endpoint -Path "/api/me" -ExpectStatus @(401) | Out-Null
 
 $failed = @($results | Where-Object { -not $_.Ok })
+Remove-Item -LiteralPath $CookieJar, $BodyFile -ErrorAction SilentlyContinue
 Write-Host "`n=== $($results.Count) tests, $($failed.Count) failed ==="
 if ($failed.Count -gt 0) {
     $failed | Format-Table Method, Path, Code -AutoSize

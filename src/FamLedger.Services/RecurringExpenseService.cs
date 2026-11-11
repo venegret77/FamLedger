@@ -26,14 +26,13 @@ public class RecurringExpenseService(
             DefinitionCurrency = currency.ToUpperInvariant(),
             ChargeDayOfMonth = Math.Clamp(chargeDay, 1, 28)
         };
-        db.RecurringExpenses.Add(expense);
-
         var context = await db.BudgetContexts.FindAsync([contextId], ct)!;
         var period = await periodService.EnsureActivePeriodAsync(context!, ct);
         var baseAmount = currency.Equals("RSD", StringComparison.OrdinalIgnoreCase)
             ? amount
             : await exchangeRateService.ConvertToBaseAsync(amount, currency, period.StartDate, contextId, period.Id, ct);
 
+        db.RecurringExpenses.Add(expense);
         db.PeriodRecurringItems.Add(new PeriodRecurringItem
         {
             PeriodId = period.Id,
@@ -77,6 +76,27 @@ public class RecurringExpenseService(
         item.IsPaid = !item.IsPaid;
         item.PaidAt = item.IsPaid ? DateTime.UtcNow : null;
         await db.SaveChangesAsync(ct);
+    }
+
+    public async Task<bool> TryMarkPaidAsync(Guid itemId, Guid userId, CancellationToken ct = default)
+    {
+        var contextId = await db.PeriodRecurringItems
+            .Where(item => item.Id == itemId)
+            .Select(item => (Guid?)item.Period.ContextId)
+            .SingleOrDefaultAsync(ct);
+        if (contextId is null) return false;
+
+        var member = await contextService.GetMembershipAsync(contextId.Value, userId, ct);
+        if (member is null || !RolePermissions.CanManagePlan(member.Role)) return false;
+
+        var paidAt = DateTime.UtcNow;
+        var updated = await db.PeriodRecurringItems
+            .Where(item => item.Id == itemId && !item.IsPaid && !item.IsSkipped && !item.Period.IsClosed)
+            .Where(item => item.Period.Context.Members.Any(m => m.UserId == userId && m.Role == member.Role))
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.IsPaid, true)
+                .SetProperty(item => item.PaidAt, paidAt), ct);
+        return updated == 1;
     }
 
     public async Task ToggleSkippedAsync(Guid itemId, Guid userId, CancellationToken ct = default)

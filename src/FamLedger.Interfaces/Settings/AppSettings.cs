@@ -3,7 +3,7 @@ namespace FamLedger.Interfaces.Settings;
 public class AppSettings : IAppSettings
 {
     public string TelegramBotToken { get; set; } = string.Empty;
-    public string JwtSecret { get; set; } = "change-me-in-production-min-32-chars!!";
+    public string JwtSecret { get; set; } = string.Empty;
     public string JwtIssuer { get; set; } = "FamLedger";
     public int JwtExpiryHours { get; set; } = 168;
     public string MinioEndpoint { get; set; } = "localhost:9000";
@@ -14,6 +14,7 @@ public class AppSettings : IAppSettings
     public string WebPushPublicKey { get; set; } = string.Empty;
     public string WebPushPrivateKey { get; set; } = string.Empty;
     public string WebPushSubject { get; set; } = "mailto:admin@famledger.local";
+    public string[] AllowedWebhookUrls { get; set; } = [];
     public int TelegramUpdateWorkerCount { get; set; } = 2;
     public string WebPublicUrl { get; set; } = "http://localhost:5173";
 }

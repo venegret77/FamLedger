@@ -18,9 +18,9 @@ public class RemindersController(
     IUserService userService,
     IReminderService reminderService) : ControllerBase
 {
-    public record ReminderDayRequest(int Day, bool Enabled, string? TimeUtc);
+    public record ReminderDayRequest(int Day, bool Enabled, string? TimeUtc, string? TimeLocal);
 
-    public record ReminderScheduleRequest(bool SameTimeEveryDay, ReminderDayRequest[]? Days);
+    public record ReminderScheduleRequest(bool SameTimeEveryDay, ReminderDayRequest[]? Days, string? TimeZoneId);
 
     public record ReminderRequest(
         string? Message,
@@ -34,10 +34,17 @@ public class RemindersController(
     [HttpGet]
     public async Task<IActionResult> List(CancellationToken ct)
     {
-        var (context, userId) = await GetActiveContextAsync(ct);
-        await reminderService.EnsureDefaultsAsync(context.Id, userId, context.IsPersonal, ct);
-        var items = await reminderService.ListVisibleAsync(context.Id, userId, ct);
-        return Ok(items.Select(r => ToDto(r, userId)));
+        try
+        {
+            var (context, userId) = await GetActiveContextAsync(ct);
+            await reminderService.EnsureDefaultsAsync(context.Id, userId, context.IsPersonal, ct);
+            var items = await reminderService.ListVisibleAsync(context.Id, userId, ct);
+            return Ok(items.Select(r => ToDto(r, userId)));
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
     }
 
     [HttpPost]
@@ -88,6 +95,8 @@ public class RemindersController(
         try
         {
             var (context, userId) = await GetActiveContextAsync(ct);
+            if (!await db.Reminders.AnyAsync(reminder => reminder.Id == id && reminder.ContextId == context.Id, ct))
+                return NotFound();
             if (!TryParseAudience(request.Audience, out var audience))
                 return BadRequest(new { message = "Invalid audience" });
 
@@ -129,7 +138,9 @@ public class RemindersController(
     {
         try
         {
-            var (_, userId) = await GetActiveContextAsync(ct);
+            var (context, userId) = await GetActiveContextAsync(ct);
+            if (!await db.Reminders.AnyAsync(reminder => reminder.Id == id && reminder.ContextId == context.Id, ct))
+                return NotFound();
             await reminderService.DeleteAsync(id, userId, ct);
             return NoContent();
         }
@@ -148,8 +159,9 @@ public class RemindersController(
         var user = await userService.GetByIdAsync(User.GetUserId(), ct)
             ?? throw new InvalidOperationException("User not found");
         if (user.ActiveContextId is null) throw new InvalidOperationException("No active context");
-        var context = await db.BudgetContexts.FindAsync([user.ActiveContextId.Value], ct)
-            ?? throw new InvalidOperationException("Context not found");
+        var context = await db.BudgetContexts.FirstOrDefaultAsync(
+            context => context.Id == user.ActiveContextId && context.Members.Any(member => member.UserId == user.Id), ct)
+            ?? throw new UnauthorizedAccessException();
         return (context, user.Id);
     }
 
@@ -180,13 +192,15 @@ public class RemindersController(
         return new
         {
             schedule.SameTimeEveryDay,
+            schedule.TimeZoneId,
             Days = schedule.Days
                 .Where(day => day.Enabled)
                 .Select(day => new
                 {
                     day.Day,
                     day.Enabled,
-                    TimeUtc = day.TimeUtc.ToString("HH:mm"),
+                    TimeUtc = schedule.TimeZoneId is null ? day.TimeUtc.ToString("HH:mm") : null,
+                    TimeLocal = day.TimeLocal?.ToString("HH:mm"),
                 }),
         };
     }
@@ -222,9 +236,10 @@ public class RemindersController(
         {
             if (!day.Enabled)
                 continue;
-            if (string.IsNullOrWhiteSpace(day.TimeUtc) || !TimeOnly.TryParse(day.TimeUtc, out var parsed))
+            var time = request.TimeZoneId is null ? day.TimeUtc : day.TimeLocal;
+            if (!TimeOnly.TryParseExact(time, "HH:mm", out var parsed))
             {
-                error = "Invalid timeUtc, expected HH:mm";
+                error = "Invalid schedule time, expected HH:mm";
                 return false;
             }
 
@@ -232,13 +247,15 @@ public class RemindersController(
             {
                 Day = day.Day,
                 Enabled = true,
-                TimeUtc = new TimeOnly(parsed.Hour, parsed.Minute),
+                TimeUtc = request.TimeZoneId is null ? parsed : default,
+                TimeLocal = request.TimeZoneId is null ? null : parsed,
             });
         }
 
         schedule = new ReminderSchedule
         {
             SameTimeEveryDay = request.SameTimeEveryDay,
+            TimeZoneId = request.TimeZoneId,
             Days = days,
         };
         return true;

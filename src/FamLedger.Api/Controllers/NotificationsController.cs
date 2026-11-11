@@ -1,8 +1,10 @@
 using FamLedger.Api.Extensions;
 using FamLedger.Interfaces.Services;
 using FamLedger.Repository;
+using FamLedger.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace FamLedger.Api.Controllers;
 
@@ -24,17 +26,21 @@ public class NotificationsController(INotificationService notificationService) :
 [ApiController]
 [Route("api/webhooks")]
 [Authorize]
-public class WebhooksController(AppDbContext db) : ControllerBase
+public class WebhooksController(AppDbContext db, WebhookDestinations webhookDestinations) : ControllerBase
 {
     public record WebhookRequest(string Url);
 
     [HttpPost]
     public async Task<IActionResult> Register([FromBody] WebhookRequest request, CancellationToken ct)
     {
+        var destination = webhookDestinations.Resolve(request.Url);
+        if (destination is null)
+            return BadRequest(new { message = "Адрес вебхука не разрешён." });
+
         var endpoint = new Domain.Entities.WebhookEndpoint
         {
             UserId = User.GetUserId(),
-            Url = request.Url,
+            Url = destination.AbsoluteUri,
             Secret = Guid.NewGuid().ToString("N")
         };
         db.WebhookEndpoints.Add(endpoint);
@@ -46,6 +52,6 @@ public class WebhooksController(AppDbContext db) : ControllerBase
     public async Task<IActionResult> List(CancellationToken ct)
     {
         var list = db.WebhookEndpoints.Where(w => w.UserId == User.GetUserId()).Select(w => new { w.Id, w.Url, w.IsActive, w.CreatedAt });
-        return Ok(await Task.FromResult(list.ToList()));
+        return Ok(await list.ToListAsync(ct));
     }
 }

@@ -88,6 +88,10 @@ namespace FamLedger.Repository.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("ContextId")
+                        .IsUnique()
+                        .HasFilter("NOT \"IsClosed\"");
+
                     b.HasIndex("ContextId", "StartDate");
 
                     b.ToTable("budget_periods", (string)null);
@@ -748,6 +752,9 @@ namespace FamLedger.Repository.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)");
 
+                    b.Property<DateTime?>("NextDueAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("ScheduleJson")
                         .HasColumnType("jsonb");
 
@@ -765,7 +772,7 @@ namespace FamLedger.Repository.Migrations
 
                     b.HasIndex("CreatedByUserId");
 
-                    b.HasIndex("IsEnabled", "TimeUtc");
+                    b.HasIndex("IsEnabled", "NextDueAtUtc");
 
                     b.HasIndex("ContextId", "Kind", "CreatedByUserId");
 

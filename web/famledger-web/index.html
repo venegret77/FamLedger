@@ -6,6 +6,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
     <meta name="theme-color" content="#059669" />
     <title>FamLedger — семейный бюджет</title>
+    <script>
+      window.addEventListener('error', (event) => {
+        const script = event.target
+        if (!(script instanceof HTMLScriptElement) || script.type !== 'module') return
+        const key = 'famledger:reloaded-entry'
+        try {
+          if (sessionStorage.getItem(key) === script.src) return
+          sessionStorage.setItem(key, script.src)
+          location.reload()
+        } catch {
+          // Storage can be disabled in a private or embedded browser.
+        }
+      }, true)
+    </script>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body class="antialiased">

@@ -13,6 +13,18 @@ public class SavingsService(
 {
     public async Task<SavingsEntry> GetOrCreateForPeriodAsync(Guid contextId, Guid periodId, CancellationToken ct = default)
     {
+        var existing = await db.SavingsEntries.FirstOrDefaultAsync(s => s.ContextId == contextId && s.PeriodId == periodId, ct);
+        if (existing is not null) return existing;
+
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await db.LockBudgetAsync(contextId, ct);
+        var entry = await GetOrCreateLockedAsync(contextId, periodId, ct);
+        await transaction.CommitAsync(ct);
+        return entry;
+    }
+
+    private async Task<SavingsEntry> GetOrCreateLockedAsync(Guid contextId, Guid periodId, CancellationToken ct)
+    {
         var entry = await db.SavingsEntries.FirstOrDefaultAsync(s => s.ContextId == contextId && s.PeriodId == periodId, ct);
         if (entry is not null) return entry;
 
@@ -52,11 +64,6 @@ public class SavingsService(
     {
         if (amount <= 0) throw new ArgumentOutOfRangeException(nameof(amount));
 
-        var withdrawBase = await ToBaseAtCurrentRateAsync(contextId, periodId, amount, currency, ct);
-        var balance = await GetTotalBalanceAsync(contextId, ct);
-        if (withdrawBase > balance)
-            throw new InvalidOperationException("Недостаточно средств в копилке.");
-
         await AddMovementAsync(contextId, periodId, -amount, currency, userId, ct);
     }
 
@@ -68,6 +75,8 @@ public class SavingsService(
         Guid userId,
         CancellationToken ct)
     {
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await db.LockBudgetAsync(contextId, ct);
         var member = await contextService.GetMembershipAsync(contextId, userId, ct);
         if (member is null || !RolePermissions.CanManagePlan(member.Role))
             throw new UnauthorizedAccessException();
@@ -78,7 +87,14 @@ public class SavingsService(
             ? context.BaseCurrency
             : currency.ToUpperInvariant();
 
-        await GetOrCreateForPeriodAsync(contextId, periodId, ct);
+        if (signedAmount < 0)
+        {
+            var withdrawal = await ToBaseAtCurrentRateAsync(contextId, periodId, -signedAmount, code, ct);
+            if (withdrawal > await GetTotalBalanceAsync(contextId, ct))
+                throw new InvalidOperationException("Недостаточно средств в копилке.");
+        }
+
+        var entry = await GetOrCreateLockedAsync(contextId, periodId, ct);
 
         db.SavingsDeposits.Add(new SavingsDeposit
         {
@@ -89,9 +105,10 @@ public class SavingsService(
             Currency = code
         });
 
-        var entry = await db.SavingsEntries.FirstAsync(s => s.ContextId == contextId && s.PeriodId == periodId, ct);
+        await db.SaveChangesAsync(ct);
         entry.ActualAmount = await SumDepositsInBaseAsync(contextId, periodId, ct);
         await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
     }
 
     public async Task SetPlanAsync(
@@ -159,6 +176,8 @@ public class SavingsService(
         Guid userId,
         CancellationToken ct = default)
     {
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await db.LockBudgetAsync(contextId, ct);
         var deposit = await db.SavingsDeposits
             .FirstOrDefaultAsync(d => d.Id == depositId && d.ContextId == contextId, ct)
             ?? throw new InvalidOperationException("Операция не найдена.");
@@ -170,6 +189,9 @@ public class SavingsService(
         var periodId = deposit.PeriodId;
 
         db.SavingsDeposits.Remove(deposit);
+        await db.SaveChangesAsync(ct);
+        if (deposit.Amount > 0 && await GetTotalBalanceAsync(contextId, ct) < 0)
+            throw new InvalidOperationException("Удаление приведёт к отрицательному балансу копилки.");
 
         var entry = await db.SavingsEntries
             .FirstOrDefaultAsync(s => s.ContextId == contextId && s.PeriodId == periodId, ct);
@@ -177,6 +199,7 @@ public class SavingsService(
             entry.ActualAmount = await SumDepositsInBaseAsync(contextId, periodId, ct);
 
         await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
     }
 
     public async Task<IReadOnlyList<SavingsPeriodView>> GetPlansAsync(Guid contextId, CancellationToken ct = default)

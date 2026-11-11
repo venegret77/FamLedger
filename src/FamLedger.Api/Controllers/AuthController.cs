@@ -1,14 +1,20 @@
 using System.Security.Claims;
 using FamLedger.Api.Extensions;
 using FamLedger.Interfaces.Services;
+using FamLedger.Interfaces.Settings;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace FamLedger.Api.Controllers;
 
 [ApiController]
 [Route("api/auth")]
-public class AuthController(IAuthService authService, ILoginTokenService loginTokenService) : ControllerBase
+public class AuthController(
+    IAuthService authService,
+    ILoginTokenService loginTokenService,
+    IAppSettings settings,
+    IWebHostEnvironment environment) : ControllerBase
 {
     public record TelegramAuthRequest(
         long Id,
@@ -62,6 +68,7 @@ public class AuthController(IAuthService authService, ILoginTokenService loginTo
     }
 
     [HttpPost("bot")]
+    [EnableRateLimiting("bot-login")]
     public async Task<IActionResult> BotLogin([FromBody] BotLoginRequest request, CancellationToken ct)
     {
         var telegramId = await loginTokenService.ConsumeAsync(request.Token, ct);
@@ -101,20 +108,16 @@ public class AuthController(IAuthService authService, ILoginTokenService loginTo
     private void AppendAuthCookie(string token)
     {
         var options = AuthCookieOptions();
-        options.MaxAge = TimeSpan.FromDays(7);
+        options.MaxAge = TimeSpan.FromHours(settings.JwtExpiryHours);
         Response.Cookies.Append("auth_token", token, options);
     }
 
     private CookieOptions AuthCookieOptions()
     {
-        var forwardedProto = Request.Headers["X-Forwarded-Proto"].ToString();
-        var secure = Request.IsHttps ||
-                     string.Equals(forwardedProto, "https", StringComparison.OrdinalIgnoreCase);
-
         return new CookieOptions
         {
             HttpOnly = true,
-            Secure = secure,
+            Secure = !environment.IsDevelopment() || Request.IsHttps,
             SameSite = SameSiteMode.Lax,
         };
     }

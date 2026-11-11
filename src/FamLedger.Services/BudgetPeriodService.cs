@@ -29,12 +29,22 @@ public class BudgetPeriodService(
         if (active is not null)
             return active;
 
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await db.LockBudgetAsync(context.Id, ct);
+        active = await db.BudgetPeriods.FirstOrDefaultAsync(p => p.ContextId == context.Id && !p.IsClosed, ct);
+        if (active is not null)
+        {
+            await transaction.CommitAsync(ct);
+            return active;
+        }
+
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         var (start, end, label) = GetPeriodBounds(context, today);
         var period = new BudgetPeriod { ContextId = context.Id, Label = label, StartDate = start, EndDate = end };
         db.BudgetPeriods.Add(period);
         await db.SaveChangesAsync(ct);
         await CopyRecurringItemsAsync(context, period, ct);
+        await transaction.CommitAsync(ct);
         return period;
     }
 
@@ -65,6 +75,15 @@ public class BudgetPeriodService(
         Guid? closedByUserId = null,
         CancellationToken ct = default)
     {
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await db.LockBudgetAsync(context.Id, ct);
+        if (closedByUserId is { } userId)
+        {
+            var member = await contextService.GetMembershipAsync(context.Id, userId, ct);
+            if (member is null || !RolePermissions.CanManagePlan(member.Role))
+                throw new UnauthorizedAccessException();
+        }
+        await db.Entry(period).ReloadAsync(ct);
         if (period.IsClosed)
             throw new InvalidOperationException("Период уже закрыт.");
 
@@ -74,6 +93,7 @@ public class BudgetPeriodService(
         db.PeriodSnapshots.Add(snapshot);
 
         period.IsClosed = true;
+        await db.SaveChangesAsync(ct);
 
         var nextStart = period.EndDate.AddDays(1);
         var (start, end, label) = GetPeriodBounds(context, nextStart);
@@ -88,6 +108,7 @@ public class BudgetPeriodService(
         db.BudgetPeriods.Add(newPeriod);
         await db.SaveChangesAsync(ct);
         await CopyRecurringItemsAsync(context, newPeriod, ct);
+        await transaction.CommitAsync(ct);
         return newPeriod;
     }
 
@@ -211,31 +232,36 @@ public class BudgetPeriodService(
         int IncomeCount,
         int TransactionCount)> AggregateTransactionsAsync(Guid periodId, CancellationToken ct)
     {
-        var transactions = await db.Transactions
-            .AsNoTracking()
-            .Include(t => t.Category)
-            .Where(t => t.PeriodId == periodId)
+        var transactions = db.Transactions.AsNoTracking().Where(t => t.PeriodId == periodId);
+        var byCategory = await transactions
+            .Where(t => t.Kind == TransactionKind.Expense)
+            .GroupBy(t => t.Category != null && t.Category.ContextId == t.ContextId ? t.Category.Name : "Без категории")
+            .Select(g => new CategoryBreakdownItem(g.Key,
+                g.Sum(t => t.BaseAmount > -FxConversion.MaxMoneyAmount && t.BaseAmount < FxConversion.MaxMoneyAmount
+                    ? Math.Round(t.BaseAmount, 4) : 0m), g.Count()))
             .ToListAsync(ct);
 
-        var byCategory = transactions
-            .Where(t => t.Kind == TransactionKind.Expense)
-            .GroupBy(t => t.Category?.Name ?? "Без категории")
-            .Select(g => new CategoryBreakdownItem(g.Key, g.Sum(x => x.BaseAmount), g.Count()))
-            .OrderByDescending(x => x.Amount)
-            .ToList();
-
-        var byDay = transactions
+        var daily = await transactions
             .GroupBy(t => t.Date)
-            .Select(g => new DailyBreakdownItem(
-                g.Key,
-                g.Where(t => t.Kind == TransactionKind.Expense).Sum(t => t.BaseAmount),
-                g.Where(t => t.Kind == TransactionKind.Income).Sum(t => t.BaseAmount)))
+            .Select(g => new
+            {
+                Date = g.Key,
+                Expenses = g.Count(t => t.Kind == TransactionKind.Expense),
+                Incomes = g.Count(t => t.Kind == TransactionKind.Income),
+                Total = g.Count(),
+                Spent = g.Sum(t => t.Kind == TransactionKind.Expense
+                    && t.BaseAmount > -FxConversion.MaxMoneyAmount && t.BaseAmount < FxConversion.MaxMoneyAmount
+                    ? Math.Round(t.BaseAmount, 4) : 0m),
+                TopUps = g.Sum(t => t.Kind == TransactionKind.Income
+                    && t.BaseAmount > -FxConversion.MaxMoneyAmount && t.BaseAmount < FxConversion.MaxMoneyAmount
+                    ? Math.Round(t.BaseAmount, 4) : 0m)
+            })
             .OrderByDescending(x => x.Date)
-            .ToList();
+            .ToListAsync(ct);
 
-        var expenseCount = transactions.Count(t => t.Kind == TransactionKind.Expense);
-        var incomeCount = transactions.Count(t => t.Kind == TransactionKind.Income);
-        return (byCategory, byDay, expenseCount, incomeCount, transactions.Count);
+        var byDay = daily.Select(day => new DailyBreakdownItem(day.Date, day.Spent, day.TopUps)).ToList();
+        return (byCategory.OrderByDescending(category => category.Amount).ToList(), byDay,
+            daily.Sum(day => day.Expenses), daily.Sum(day => day.Incomes), daily.Sum(day => day.Total));
     }
 
     private static PeriodHistoryDetail FromSnapshot(BudgetPeriod period, PeriodSnapshot snap)

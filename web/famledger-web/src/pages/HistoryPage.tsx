@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { usePeriodHistory, usePeriods, useTransactions } from '../api/hooks'
+import { fetchTransactionsForReport, usePeriodHistory, usePeriods, useTransactions } from '../api/hooks'
 import { Card, CardTitle } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 import { EmptyState, PageHeader, Spinner, Tabs, Badge } from '../components/ui/Tabs'
@@ -26,6 +26,7 @@ export function HistoryPage() {
   const { data: periods, isLoading, isError, refetch } = usePeriods()
   const [selectedId, setSelectedId] = useState<string>('')
   const [activeTab, setActiveTab] = useState('overview')
+  const [exporting, setExporting] = useState(false)
 
   useEffect(() => {
     if (!periods?.length) return
@@ -36,8 +37,10 @@ export function HistoryPage() {
   }, [periods, selectedId])
 
   const { data: detail, isLoading: detailLoading } = usePeriodHistory(selectedId || undefined)
-  const { data: transactions, isLoading: txLoading } = useTransactions(
+  const { data: transactions, isLoading: txLoading, isError: txError, refetch: retryTransactions,
+    hasNextPage, fetchNextPage, isFetchingNextPage } = useTransactions(
     selectedId || undefined,
+    Boolean(selectedId) && activeTab === 'list',
   )
 
   const periodOptions = useMemo(
@@ -50,7 +53,7 @@ export function HistoryPage() {
   )
 
   const currency = detail?.currency ?? periods?.[0]?.currency ?? 'RSD'
-  const reportReady = Boolean(detail) && !detailLoading && !txLoading
+  const reportReady = Boolean(detail) && !detailLoading && !exporting
 
   function titleFor(tx: { note?: string; categoryName?: string; kind?: string }) {
     if (tx.note) return tx.note
@@ -58,23 +61,27 @@ export function HistoryPage() {
     return (tx.kind ?? 'Expense') === 'Income' ? 'Пополнение' : 'Расход'
   }
 
-  function handleDownloadReport() {
+  async function exportReport(copy: boolean) {
     if (!detail) return
-    const markdown = buildPeriodHistoryMarkdown(detail, transactions)
-    downloadTextFile(periodReportFileName(detail), markdown)
-  }
-
-  async function handleCopyReport() {
-    if (!detail) return
-    const markdown = buildPeriodHistoryMarkdown(detail, transactions)
-    const ok = await copyToClipboard(markdown)
-    showToast({
-      title: ok ? 'Отчёт скопирован' : 'Не удалось скопировать',
-      message: ok
-        ? 'Markdown в буфере — можно вставить в чат с ИИ.'
-        : 'Скачайте файл кнопкой «Скачать .md».',
-      tone: ok ? 'info' : 'warning',
-    })
+    setExporting(true)
+    try {
+      const allTransactions = await fetchTransactionsForReport(detail.id)
+      const markdown = buildPeriodHistoryMarkdown(detail, allTransactions)
+      if (!copy) {
+        downloadTextFile(periodReportFileName(detail), markdown)
+        return
+      }
+      const ok = await copyToClipboard(markdown)
+      showToast({
+        title: ok ? 'Отчёт скопирован' : 'Не удалось скопировать',
+        message: ok ? undefined : 'Скачайте файл кнопкой «Скачать .md».',
+        tone: ok ? 'info' : 'warning',
+      })
+    } catch {
+      showToast({ title: 'Не удалось загрузить операции для отчёта', tone: 'warning' })
+    } finally {
+      setExporting(false)
+    }
   }
 
   if (isLoading) {
@@ -121,7 +128,7 @@ export function HistoryPage() {
               variant="secondary"
               size="sm"
               disabled={!reportReady}
-              onClick={() => void handleCopyReport()}
+              onClick={() => void exportReport(true)}
             >
               Копировать отчёт
             </Button>
@@ -129,7 +136,7 @@ export function HistoryPage() {
               variant="primary"
               size="sm"
               disabled={!reportReady}
-              onClick={handleDownloadReport}
+              onClick={() => void exportReport(false)}
             >
               Скачать .md
             </Button>
@@ -228,6 +235,9 @@ export function HistoryPage() {
         <div className="flex justify-center py-12">
           <Spinner />
         </div>
+      ) : txError && !transactions?.length ? (
+        <EmptyState title="Не удалось загрузить операции"
+          action={<Button variant="secondary" onClick={() => void retryTransactions()}>Повторить</Button>} />
       ) : !transactions?.length ? (
         <EmptyState title="Операций в этом периоде нет" />
       ) : (
@@ -258,6 +268,11 @@ export function HistoryPage() {
             ))}
           </ul>
         </Card>
+      )}
+      {activeTab === 'list' && hasNextPage && (
+        <Button variant="secondary" loading={isFetchingNextPage} onClick={() => void fetchNextPage()}>
+          Загрузить ещё
+        </Button>
       )}
     </div>
   )
