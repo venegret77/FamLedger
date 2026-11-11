@@ -29,7 +29,7 @@ Before deploying the period constraint, run the following query and review the o
     GROUP BY "ContextId"
     HAVING count(*) > 1;
 
-The deploy script checks API health, health through nginx, and the JavaScript content type. It retains the previously running application images for rollback. Image rollback does not roll back PostgreSQL migrations. Before a schema change, take a backup and decide whether restoring data is necessary if the migration is incompatible with the previous application.
+The deploy script checks API health, health through nginx, and the JavaScript content type. Automatic rollback requires all three previous application images. If Docker cannot retain one of them, the script logs a warning and continues the deploy. Image rollback does not roll back PostgreSQL migrations. Before a schema change, take a backup and decide whether restoring data is necessary if the migration is incompatible with the previous application.
 
 Compose builds the MinIO community server and client from tagged upstream sources. The MinIO data volume is unchanged. Back up the volume before the first rollout of the source-built image.
 

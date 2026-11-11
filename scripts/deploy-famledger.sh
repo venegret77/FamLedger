@@ -46,14 +46,21 @@ wait_for_web() {
 
 previous_available=true
 for service in api bot web; do
-  container=$(docker compose ps --status running -q "$service")
-  if [[ -z "$container" ]]; then
+  if ! container=$(docker compose ps --status running -q "$service") || [[ -z "$container" ]]; then
+    echo "No running $service container available for rollback." >&2
     previous_available=false
     continue
   fi
-  previous_image=$(docker inspect --format '{{.Image}}' "$container")
-  docker tag "$previous_image" "famledger-$service:rollback"
+  if ! previous_image=$(docker inspect --format '{{.Image}}' "$container") ||
+     ! docker tag "$previous_image" "famledger-$service:rollback"; then
+    echo "Could not save the previous $service image for rollback." >&2
+    previous_available=false
+  fi
 done
+
+if [[ "$previous_available" == false ]]; then
+  echo 'Continuing deploy without automatic rollback because previous images are unavailable.' >&2
+fi
 
 docker compose build api bot web minio
 if docker compose up -d --no-build api bot web && wait_for_web; then
